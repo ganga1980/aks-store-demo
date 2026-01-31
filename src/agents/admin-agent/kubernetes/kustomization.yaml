@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: admin-agent
+
+namespace: pets
+
+resources:
+  - admin-agent-serviceaccount.yaml
+  - admin-agent-configmap.yaml
+  - admin-agent-secrets.yaml
+  - admin-agent-deployment.yaml
+  - admin-agent-service.yaml
+  - admin-agent-hpa.yaml
+  - admin-agent-pdb.yaml
+  - admin-agent-networkpolicy.yaml
+  # - admin-agent-ingress.yaml  # Uncomment if using Ingress instead of LoadBalancer
+
+commonLabels:
+  app.kubernetes.io/name: admin-agent
+  app.kubernetes.io/part-of: aks-store-demo
+  app.kubernetes.io/managed-by: kustomize
+
+images:
+  - name: retaillocationregistry.azurecr.io/aks-store-demo/admin-agent
+    newTag: "1.2.8"

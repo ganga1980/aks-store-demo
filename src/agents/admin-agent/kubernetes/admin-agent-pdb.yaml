@@ -1,0 +1,15 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: admin-agent-pdb
+  namespace: pets
+  labels:
+    app: admin-agent
+    app.kubernetes.io/name: admin-agent
+    app.kubernetes.io/component: pdb
+    app.kubernetes.io/part-of: aks-store-demo
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: admin-agent

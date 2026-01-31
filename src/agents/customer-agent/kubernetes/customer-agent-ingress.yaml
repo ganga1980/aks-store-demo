@@ -1,0 +1,40 @@
+# Optional: Use this instead of LoadBalancer service if you have an Ingress Controller
+# This requires nginx-ingress or Azure Application Gateway Ingress Controller (AGIC)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: customer-agent
+  namespace: pets
+  labels:
+    app: customer-agent
+    app.kubernetes.io/name: customer-agent
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: aks-store-demo
+  annotations:
+    # For nginx ingress controller
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # WebSocket support for Chainlit
+    nginx.ingress.kubernetes.io/websocket-services: "customer-agent"
+    # For Azure Application Gateway Ingress Controller (AGIC)
+    # kubernetes.io/ingress.class: azure/application-gateway
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: customer-agent.example.com # Replace with your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: customer-agent
+                port:
+                  number: 80
+  # Optional: TLS configuration
+  # tls:
+  #   - hosts:
+  #       - customer-agent.example.com
+  #     secretName: customer-agent-tls

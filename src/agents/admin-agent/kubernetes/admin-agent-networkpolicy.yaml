@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: admin-agent-netpol
+  namespace: pets
+  labels:
+    app: admin-agent
+    app.kubernetes.io/name: admin-agent
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: aks-store-demo
+spec:
+  podSelector:
+    matchLabels:
+      app: admin-agent
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from the ingress controller
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Allow traffic from within the same namespace
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Allow traffic from any source to the LoadBalancer
+    - from: []
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow HTTPS traffic to Azure services
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    # Allow traffic to backend services in the same namespace
+    - to:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 3001 # makeline-service
+        - protocol: TCP
+          port: 3002 # product-service

@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "customer-agent"
+version = "1.0.0"
+description = "Customer-facing AI Agent for AKS Store Demo using Microsoft Agent Framework"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "AKS Store Demo Team"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # Microsoft Agent Framework
+    "agent-framework>=1.0.0b0",
+    "nest-asyncio>=1.6.0",
+    "azure-identity>=1.15.0",
+
+    # Chainlit for conversational UI
+    "chainlit>=1.3.0",
+
+    # OpenTelemetry for observability with Gen AI semantics
+    "opentelemetry-sdk>=1.25.0",
+    "opentelemetry-api>=1.25.0",
+    "opentelemetry-instrumentation>=0.46b0",
+    "opentelemetry-exporter-otlp>=1.25.0",
+    "azure-monitor-opentelemetry>=1.6.0",
+    "azure-core-tracing-opentelemetry>=1.0.0",
+
+    # HTTP client for service calls
+    "httpx>=0.27.0",
+    "aiohttp>=3.9.0",
+
+    # Utilities
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=24.0.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+]
+
+[project.scripts]
+customer-agent = "app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "W"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

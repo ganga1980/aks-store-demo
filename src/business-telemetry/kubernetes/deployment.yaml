@@ -1,0 +1,233 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: business-telemetry
+  labels:
+    app: business-telemetry
+    app.kubernetes.io/name: business-telemetry
+    app.kubernetes.io/component: telemetry
+    app.kubernetes.io/part-of: aks-store-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: business-telemetry
+  template:
+    metadata:
+      labels:
+        app: business-telemetry
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: business-telemetry
+      containers:
+        - name: business-telemetry
+          image: ghcr.io/azure-samples/aks-store-demo/business-telemetry:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          env:
+            - name: FABRIC_TELEMETRY_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_TELEMETRY_ENABLED
+            - name: FABRIC_SINK_TYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_SINK_TYPE
+            - name: FABRIC_ENVIRONMENT
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_ENVIRONMENT
+            - name: FABRIC_SERVICE_NAME
+              value: "business-telemetry"
+            - name: FABRIC_BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_BATCH_SIZE
+                  optional: true
+            - name: FABRIC_FLUSH_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_FLUSH_INTERVAL
+                  optional: true
+            # Event Hub configuration
+            - name: FABRIC_EVENT_HUB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: business-telemetry-secrets
+                  key: FABRIC_EVENT_HUB_CONNECTION_STRING
+                  optional: true
+            - name: FABRIC_EVENT_HUB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_EVENT_HUB_NAME
+                  optional: true
+            # OneLake configuration
+            - name: FABRIC_ONELAKE_WORKSPACE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_ONELAKE_WORKSPACE_ID
+                  optional: true
+            - name: FABRIC_ONELAKE_LAKEHOUSE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: FABRIC_ONELAKE_LAKEHOUSE_ID
+                  optional: true
+            # Azure Identity for managed identity auth
+            - name: AZURE_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: business-telemetry-config
+                  key: AZURE_CLIENT_ID
+                  optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: business-telemetry
+                topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: business-telemetry
+  labels:
+    app: business-telemetry
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: business-telemetry
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: business-telemetry
+  labels:
+    app: business-telemetry
+  annotations:
+    # For Azure Workload Identity
+    azure.workload.identity/client-id: "${AZURE_CLIENT_ID}"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: business-telemetry-config
+  labels:
+    app: business-telemetry
+data:
+  FABRIC_TELEMETRY_ENABLED: "true"
+  FABRIC_SINK_TYPE: "console" # Change to "eventhub" or "onelake" for production
+  FABRIC_ENVIRONMENT: "development"
+  FABRIC_BATCH_SIZE: "100"
+  FABRIC_FLUSH_INTERVAL: "5.0"
+  # Event Hub settings (set when using eventhub sink)
+  # FABRIC_EVENT_HUB_NAME: "business-telemetry"
+  # OneLake settings (set when using onelake sink)
+  # FABRIC_ONELAKE_WORKSPACE_ID: "<workspace-guid>"
+  # FABRIC_ONELAKE_LAKEHOUSE_ID: "<lakehouse-guid>"
+  # Azure Workload Identity (optional)
+  # AZURE_CLIENT_ID: "<managed-identity-client-id>"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: business-telemetry-secrets
+  labels:
+    app: business-telemetry
+type: Opaque
+data:
+  # Base64 encoded Event Hub connection string
+  # FABRIC_EVENT_HUB_CONNECTION_STRING: "<base64-encoded-connection-string>"
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: business-telemetry
+  labels:
+    app: business-telemetry
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: business-telemetry
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# Pod Disruption Budget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: business-telemetry
+  labels:
+    app: business-telemetry
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: business-telemetry
