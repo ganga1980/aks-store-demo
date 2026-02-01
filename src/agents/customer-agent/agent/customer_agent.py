@@ -245,13 +245,46 @@ class CustomerAgent:
                 logger.info(f"Processed message in thread {thread_id}")
 
                 # Extract token usage from AgentResponse
-                # AgentResponse has usage_details with input_token_count/output_token_count
+                # Try multiple possible attribute names and structures
                 input_tokens = None
                 output_tokens = None
+
+                # Debug: Log available attributes on the result
+                logger.debug(f"AgentResponse attributes: {dir(result)}")
+
+                # Try usage_details first (Microsoft Agent Framework)
                 if hasattr(result, 'usage_details') and result.usage_details:
-                    input_tokens = result.usage_details.get('input_token_count')
-                    output_tokens = result.usage_details.get('output_token_count')
+                    usage = result.usage_details
+                    logger.debug(f"usage_details content: {usage}")
+                    # Try different field names
+                    input_tokens = (
+                        usage.get('input_token_count') or
+                        usage.get('input_tokens') or
+                        usage.get('prompt_tokens')
+                    )
+                    output_tokens = (
+                        usage.get('output_token_count') or
+                        usage.get('output_tokens') or
+                        usage.get('completion_tokens')
+                    )
+
+                # Try usage attribute (OpenAI-style)
+                elif hasattr(result, 'usage') and result.usage:
+                    usage = result.usage
+                    logger.debug(f"usage content: {usage}")
+                    if hasattr(usage, 'prompt_tokens'):
+                        input_tokens = usage.prompt_tokens
+                    if hasattr(usage, 'completion_tokens'):
+                        output_tokens = usage.completion_tokens
+                    # Also try dict-style access
+                    if isinstance(usage, dict):
+                        input_tokens = input_tokens or usage.get('prompt_tokens') or usage.get('input_tokens')
+                        output_tokens = output_tokens or usage.get('completion_tokens') or usage.get('output_tokens')
+
+                if input_tokens is not None or output_tokens is not None:
                     logger.info(f"Token usage - input: {input_tokens}, output: {output_tokens}")
+                else:
+                    logger.warning(f"No token usage data available from AgentResponse. Check SDK version and response structure.")
 
                 # Record token usage on span
                 self.gen_ai_telemetry.set_span_response_attributes(
@@ -284,20 +317,26 @@ class CustomerAgent:
                         duration_seconds=duration,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        agent_name=self.settings.agent_name,
+                        agent_id=self.settings.agent_name,
+                        conversation_id=thread_id,
                     )
                 )
 
-                # Record token usage metrics separately
-                if input_tokens is not None or output_tokens is not None:
-                    self.gen_ai_telemetry.record_token_usage(
-                        GenAIMetricsData(
-                            operation_name=GenAIOperationName.INVOKE_AGENT.value,
-                            provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
-                            request_model=self.settings.azure_ai_model_deployment_name,
-                            input_tokens=input_tokens,
-                            output_tokens=output_tokens,
-                        )
+                # Record token usage metrics (always record, even if tokens are 0/unavailable)
+                # This ensures the metric is visible in monitoring dashboards
+                self.gen_ai_telemetry.record_token_usage(
+                    GenAIMetricsData(
+                        operation_name=GenAIOperationName.INVOKE_AGENT.value,
+                        provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
+                        request_model=self.settings.azure_ai_model_deployment_name,
+                        input_tokens=input_tokens or 0,
+                        output_tokens=output_tokens or 0,
+                        agent_name=self.settings.agent_name,
+                        agent_id=self.settings.agent_name,
+                        conversation_id=thread_id,
                     )
+                )
 
                 return response_text
 
@@ -391,10 +430,41 @@ class CustomerAgent:
                         yield chunk
 
                 # Try to extract token usage from the last chunk (AgentResponseUpdate)
-                if last_chunk and hasattr(last_chunk, 'usage_details') and last_chunk.usage_details:
-                    input_tokens = last_chunk.usage_details.get('input_token_count')
-                    output_tokens = last_chunk.usage_details.get('output_token_count')
-                    logger.info(f"Stream token usage - input: {input_tokens}, output: {output_tokens}")
+                # Try multiple possible attribute names and structures
+                if last_chunk:
+                    logger.debug(f"Last chunk type: {type(last_chunk)}, attributes: {dir(last_chunk)}")
+
+                    # Try usage_details first (Microsoft Agent Framework)
+                    if hasattr(last_chunk, 'usage_details') and last_chunk.usage_details:
+                        usage = last_chunk.usage_details
+                        logger.debug(f"Stream usage_details content: {usage}")
+                        input_tokens = (
+                            usage.get('input_token_count') or
+                            usage.get('input_tokens') or
+                            usage.get('prompt_tokens')
+                        )
+                        output_tokens = (
+                            usage.get('output_token_count') or
+                            usage.get('output_tokens') or
+                            usage.get('completion_tokens')
+                        )
+
+                    # Try usage attribute (OpenAI-style)
+                    elif hasattr(last_chunk, 'usage') and last_chunk.usage:
+                        usage = last_chunk.usage
+                        logger.debug(f"Stream usage content: {usage}")
+                        if hasattr(usage, 'prompt_tokens'):
+                            input_tokens = usage.prompt_tokens
+                        if hasattr(usage, 'completion_tokens'):
+                            output_tokens = usage.completion_tokens
+                        if isinstance(usage, dict):
+                            input_tokens = input_tokens or usage.get('prompt_tokens') or usage.get('input_tokens')
+                            output_tokens = output_tokens or usage.get('completion_tokens') or usage.get('output_tokens')
+
+                    if input_tokens is not None or output_tokens is not None:
+                        logger.info(f"Stream token usage - input: {input_tokens}, output: {output_tokens}")
+                    else:
+                        logger.warning(f"No token usage data available from streaming response. Check SDK version.")
 
                 # Record token usage on span
                 self.gen_ai_telemetry.set_span_response_attributes(
@@ -434,20 +504,20 @@ class CustomerAgent:
                     )
                 )
 
-                # Record token usage metrics separately
-                if input_tokens is not None or output_tokens is not None:
-                    self.gen_ai_telemetry.record_token_usage(
-                        GenAIMetricsData(
-                            operation_name=GenAIOperationName.INVOKE_AGENT.value,
-                            provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
-                            request_model=self.settings.azure_ai_model_deployment_name,
-                            input_tokens=input_tokens,
-                            output_tokens=output_tokens,
-                            agent_name=self.settings.agent_name,
-                            agent_id=self.settings.agent_name,
-                            conversation_id=thread_id,
-                        )
+                # Record token usage metrics (always record, even if tokens are 0/unavailable)
+                # This ensures the metric is visible in monitoring dashboards
+                self.gen_ai_telemetry.record_token_usage(
+                    GenAIMetricsData(
+                        operation_name=GenAIOperationName.INVOKE_AGENT.value,
+                        provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
+                        request_model=self.settings.azure_ai_model_deployment_name,
+                        input_tokens=input_tokens or 0,
+                        output_tokens=output_tokens or 0,
+                        agent_name=self.settings.agent_name,
+                        agent_id=self.settings.agent_name,
+                        conversation_id=thread_id,
                     )
+                )
 
             except Exception as e:
                 logger.error(f"Error streaming message: {e}")
