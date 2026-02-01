@@ -332,6 +332,19 @@ class AdminAgent:
 
         start_time = time.perf_counter()
 
+        # === GOLDEN SIGNAL: Request Count (Traffic) ===
+        self.gen_ai_telemetry.record_request(
+            GenAIMetricsData(
+                operation_name=GenAIOperationName.INVOKE_AGENT.value,
+                provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
+                request_model=self.settings.azure_ai_model_deployment_name,
+                agent_name=self.settings.agent_name,
+                agent_id=self.settings.agent_name,
+                conversation_id=thread_id,
+            )
+        )
+        # ==============================================
+
         with self.gen_ai_telemetry.invoke_agent_span(
             agent_name=self.settings.agent_name,
             agent_id=self.settings.agent_name,
@@ -437,8 +450,24 @@ class AdminAgent:
                         request_model=self.settings.azure_ai_model_deployment_name,
                         duration_seconds=duration,
                         error_type=type(e).__name__,
+                        agent_name=self.settings.agent_name,
+                        agent_id=self.settings.agent_name,
+                        conversation_id=thread_id,
                     )
                 )
+                # === GOLDEN SIGNAL: Error Count ===
+                self.gen_ai_telemetry.record_error_metric(
+                    GenAIMetricsData(
+                        operation_name=GenAIOperationName.INVOKE_AGENT.value,
+                        provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
+                        request_model=self.settings.azure_ai_model_deployment_name,
+                        error_type=type(e).__name__,
+                        agent_name=self.settings.agent_name,
+                        agent_id=self.settings.agent_name,
+                        conversation_id=thread_id,
+                    )
+                )
+                # ==================================
                 yield f"Error: {str(e)}"
 
     async def cleanup(self) -> None:

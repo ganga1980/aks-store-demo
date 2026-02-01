@@ -203,6 +203,13 @@ async def on_chat_start():
             span.set_attribute("gen_ai.conversation.id", thread_id)
             logger.info(f"New chat session started with thread: {thread_id}")
 
+            # === GOLDEN SIGNAL: Session Started (Saturation) ===
+            gen_ai_telemetry.record_session_start(
+                agent_name=settings.agent_name,
+                agent_id=settings.agent_name,
+            )
+            # ===================================================
+
             # === BUSINESS TELEMETRY: Session Started ===
             if BUSINESS_TELEMETRY_AVAILABLE:
                 try:
@@ -320,6 +327,13 @@ async def on_chat_end():
     thread_id = cl.user_session.get("thread_id")
     if thread_id:
         logger.info(f"Chat session ended for thread: {thread_id}")
+
+        # === GOLDEN SIGNAL: Session Ended (Saturation) ===
+        gen_ai_telemetry.record_session_end(
+            agent_name=settings.agent_name,
+            agent_id=settings.agent_name,
+        )
+        # =================================================
 
         # === BUSINESS TELEMETRY: Session Ended ===
         if BUSINESS_TELEMETRY_AVAILABLE:

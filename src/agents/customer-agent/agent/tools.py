@@ -162,6 +162,7 @@ def get_products() -> str:
     with telemetry.execute_tool_span(
         tool_name="get_products",
         tool_description="Get all available products from the pet store catalog",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         try:
             import asyncio
@@ -253,6 +254,7 @@ def get_product_details(
     with telemetry.execute_tool_span(
         tool_name="get_product_details",
         tool_description="Get detailed information about a specific product",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"product_id": product_id})
 
@@ -338,6 +340,7 @@ def search_products(
     with telemetry.execute_tool_span(
         tool_name="search_products",
         tool_description="Search for products by name or description",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"query": query})
 
@@ -434,6 +437,7 @@ def place_order(
     with telemetry.execute_tool_span(
         tool_name="place_order",
         tool_description="Place a new order for a customer",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(
             span,
@@ -547,6 +551,7 @@ def get_order_status(
     with telemetry.execute_tool_span(
         tool_name="get_order_status",
         tool_description="Check the status of an existing order",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"order_id": order_id})
 

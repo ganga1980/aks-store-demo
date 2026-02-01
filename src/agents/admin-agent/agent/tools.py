@@ -196,6 +196,7 @@ def get_products() -> str:
     with telemetry.execute_tool_span(
         tool_name="get_products",
         tool_description="Get all products from the pet store catalog",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         try:
             import asyncio
@@ -285,6 +286,7 @@ def get_product_details(
     with telemetry.execute_tool_span(
         tool_name="get_product_details",
         tool_description="Get detailed information about a specific product",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"product_id": product_id})
 
@@ -377,6 +379,7 @@ def add_product(
     with telemetry.execute_tool_span(
         tool_name="add_product",
         tool_description="Add a new product to the catalog",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(
             span,
@@ -478,6 +481,7 @@ def update_product(
     with telemetry.execute_tool_span(
         tool_name="update_product",
         tool_description="Update an existing product in the catalog",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         args = {"product_id": product_id}
         if name is not None:
@@ -582,6 +586,7 @@ def delete_product(
     with telemetry.execute_tool_span(
         tool_name="delete_product",
         tool_description="Delete a product from the catalog",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"product_id": product_id})
 
@@ -658,6 +663,7 @@ def get_orders() -> str:
     with telemetry.execute_tool_span(
         tool_name="get_orders",
         tool_description="Get all orders from the makeline queue",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         try:
             import asyncio
@@ -736,6 +742,7 @@ def get_order_details(
     with telemetry.execute_tool_span(
         tool_name="get_order_details",
         tool_description="Get detailed information about a specific order",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"order_id": order_id})
 
@@ -827,6 +834,7 @@ def update_order_status(
     with telemetry.execute_tool_span(
         tool_name="update_order_status",
         tool_description="Update the status of an order",
+        conversation_id=_business_context.get("session_id"),
     ) as span:
         telemetry.set_tool_call_attributes(
             span,

@@ -204,6 +204,11 @@ class GenAIMetricsData:
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     duration_seconds: Optional[float] = None
+    # Agent identification for correlation
+    agent_name: Optional[str] = None
+    agent_id: Optional[str] = None
+    # Conversation/session tracking
+    conversation_id: Optional[str] = None
 
 
 class GenAITelemetry:
@@ -244,6 +249,10 @@ class GenAITelemetry:
             "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "false"
         ).lower() == "true"
 
+        # Cache K8s/cloud attributes for metrics (loaded lazily)
+        self._k8s_cloud_attrs: dict[str, Any] = {}
+        self._k8s_attrs_loaded = False
+
         # Get tracer and meter
         self._tracer = trace.get_tracer(
             instrumenting_module_name="gen_ai_telemetry",
@@ -273,12 +282,61 @@ class GenAITelemetry:
             unit="s",
         )
 
+        # Request counter - Golden Signal: Traffic
+        self._request_counter = self._meter.create_counter(
+            name="gen_ai.client.request.count",
+            description="Number of GenAI requests made",
+            unit="{request}",
+        )
+
+        # Error counter - Golden Signal: Errors
+        self._error_counter = self._meter.create_counter(
+            name="gen_ai.client.error.count",
+            description="Number of GenAI requests that resulted in errors",
+            unit="{error}",
+        )
+
+        # Active sessions gauge - Golden Signal: Saturation
+        self._active_sessions_gauge = self._meter.create_up_down_counter(
+            name="gen_ai.client.active_sessions",
+            description="Number of active agent sessions",
+            unit="{session}",
+        )
+
+    def _load_k8s_cloud_attrs(self) -> None:
+        """Load K8s and cloud attributes once (lazy initialization).
+
+        These attributes are cached at first access for efficiency since
+        they don't change during the lifetime of the pod.
+        """
+        if self._k8s_attrs_loaded:
+            return
+
+        try:
+            from .k8s_semantics import get_all_resource_attributes, is_running_in_kubernetes
+
+            if is_running_in_kubernetes():
+                self._k8s_cloud_attrs = get_all_resource_attributes()
+                logger.debug(f"Loaded {len(self._k8s_cloud_attrs)} K8s/cloud attributes for metrics")
+        except ImportError:
+            logger.debug("k8s_semantics module not available for metrics")
+        except Exception as e:
+            logger.warning(f"Failed to load K8s/cloud attributes for metrics: {e}")
+
+        self._k8s_attrs_loaded = True
+
     def _get_metric_attributes(self, data: GenAIMetricsData) -> dict[str, Any]:
-        """Get common metric attributes."""
-        attrs = {
-            "gen_ai.operation.name": data.operation_name,
-            "gen_ai.provider.name": data.provider_name,
-        }
+        """Get common metric attributes including K8s and cloud attributes."""
+        # Load K8s/cloud attributes (cached after first load)
+        self._load_k8s_cloud_attrs()
+
+        # Start with K8s/cloud attributes for infrastructure correlation
+        attrs = dict(self._k8s_cloud_attrs)
+
+        # Add Gen AI specific attributes
+        attrs["gen_ai.operation.name"] = data.operation_name
+        attrs["gen_ai.provider.name"] = data.provider_name
+
         if data.request_model:
             attrs["gen_ai.request.model"] = data.request_model
         if data.response_model:
@@ -289,6 +347,13 @@ class GenAITelemetry:
             attrs["server.port"] = data.server_port
         if data.error_type:
             attrs["error.type"] = data.error_type
+        # Add agent identification attributes for correlation
+        if data.agent_name:
+            attrs["gen_ai.agent.name"] = data.agent_name
+        if data.agent_id:
+            attrs["gen_ai.agent.id"] = data.agent_id
+        if data.conversation_id:
+            attrs["gen_ai.conversation.id"] = data.conversation_id
         return attrs
 
     def record_token_usage(
@@ -329,6 +394,76 @@ class GenAITelemetry:
                 data.duration_seconds,
                 attributes=attrs,
             )
+
+    def record_request(
+        self,
+        data: GenAIMetricsData,
+    ) -> None:
+        """
+        Record a request metric.
+
+        Golden Signal: Traffic - Records gen_ai.client.request.count counter.
+        Call this at the START of each request.
+        """
+        attrs = self._get_metric_attributes(data)
+        self._request_counter.add(1, attributes=attrs)
+
+    def record_error_metric(
+        self,
+        data: GenAIMetricsData,
+    ) -> None:
+        """
+        Record an error metric.
+
+        Golden Signal: Errors - Records gen_ai.client.error.count counter.
+        Call this when an error occurs during request processing.
+        """
+        attrs = self._get_metric_attributes(data)
+        self._error_counter.add(1, attributes=attrs)
+
+    def record_session_start(
+        self,
+        agent_name: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> None:
+        """
+        Record the start of an agent session.
+
+        Golden Signal: Saturation - Increments gen_ai.client.active_sessions gauge.
+        Call this when a new chat session starts.
+        """
+        # Load K8s/cloud attributes for infrastructure correlation
+        self._load_k8s_cloud_attrs()
+        attrs = dict(self._k8s_cloud_attrs)
+
+        attrs["gen_ai.provider.name"] = self.provider_name
+        if agent_name:
+            attrs["gen_ai.agent.name"] = agent_name
+        if agent_id:
+            attrs["gen_ai.agent.id"] = agent_id
+        self._active_sessions_gauge.add(1, attributes=attrs)
+
+    def record_session_end(
+        self,
+        agent_name: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> None:
+        """
+        Record the end of an agent session.
+
+        Golden Signal: Saturation - Decrements gen_ai.client.active_sessions gauge.
+        Call this when a chat session ends.
+        """
+        # Load K8s/cloud attributes for infrastructure correlation
+        self._load_k8s_cloud_attrs()
+        attrs = dict(self._k8s_cloud_attrs)
+
+        attrs["gen_ai.provider.name"] = self.provider_name
+        if agent_name:
+            attrs["gen_ai.agent.name"] = agent_name
+        if agent_id:
+            attrs["gen_ai.agent.id"] = agent_id
+        self._active_sessions_gauge.add(-1, attributes=attrs)
 
     def create_agent_span(
         self,
@@ -441,6 +576,7 @@ class GenAITelemetry:
         tool_description: Optional[str] = None,
         tool_type: str = GenAIToolType.FUNCTION.value,
         tool_call_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
     ):
         """
         Create a span for tool execution operation.
@@ -453,6 +589,7 @@ class GenAITelemetry:
             tool_description: Description of what the tool does
             tool_type: Type of tool (function, extension, datastore)
             tool_call_id: Unique identifier for this tool call
+            conversation_id: Thread/conversation ID for correlation
 
         Returns:
             Context manager for the span
@@ -466,6 +603,7 @@ class GenAITelemetry:
             tool_type=tool_type,
             tool_description=tool_description,
             tool_call_id=tool_call_id,
+            conversation_id=conversation_id,
         )
 
         return self._tracer.start_as_current_span(
@@ -588,6 +726,7 @@ def create_gen_ai_tool_decorator(
     telemetry: GenAITelemetry,
     tool_name: str,
     tool_description: Optional[str] = None,
+    conversation_id: Optional[str] = None,
 ) -> Callable[[F], F]:
     """
     Create a decorator for Gen AI tool functions.
@@ -599,6 +738,7 @@ def create_gen_ai_tool_decorator(
         telemetry: GenAITelemetry instance
         tool_name: Name of the tool
         tool_description: Description of what the tool does
+        conversation_id: Thread/conversation ID for correlation
 
     Returns:
         Decorator function
@@ -611,6 +751,7 @@ def create_gen_ai_tool_decorator(
             with telemetry.execute_tool_span(
                 tool_name=tool_name,
                 tool_description=tool_description or func.__doc__,
+                conversation_id=conversation_id,
             ) as span:
                 # Record arguments
                 telemetry.set_tool_call_attributes(span, arguments=kwargs or None)
@@ -644,6 +785,7 @@ def create_gen_ai_tool_decorator(
             with telemetry.execute_tool_span(
                 tool_name=tool_name,
                 tool_description=tool_description or func.__doc__,
+                conversation_id=conversation_id,
             ) as span:
                 # Record arguments
                 telemetry.set_tool_call_attributes(span, arguments=kwargs or None)
