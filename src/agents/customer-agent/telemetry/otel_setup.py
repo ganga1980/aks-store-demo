@@ -56,6 +56,7 @@ class GenAISpanProcessor(SpanProcessor):
         self,
         service_name: str,
         provider_name: str = "azure.ai.inference",
+        agent_name: Optional[str] = None,
     ):
         """
         Initialize the Gen AI span processor.
@@ -63,9 +64,11 @@ class GenAISpanProcessor(SpanProcessor):
         Args:
             service_name: Name of the service
             provider_name: Gen AI provider name per semantic conventions
+            agent_name: Name of the AI agent for gen_ai.agent.name/id attributes
         """
         self.service_name = service_name
         self.provider_name = provider_name
+        self.agent_name = agent_name
 
         # Cache K8s/cloud attributes at initialization for efficiency
         # These don't change during the lifetime of the pod
@@ -111,6 +114,14 @@ class GenAISpanProcessor(SpanProcessor):
         for attr_name, attr_value in self._k8s_cloud_attrs.items():
             span.set_attribute(attr_name, attr_value)
 
+        # Set agent identification attributes for correlation
+        # These are critical for agent-specific issue correlation
+        if self.agent_name:
+            if not span.attributes.get("gen_ai.agent.name"):
+                span.set_attribute("gen_ai.agent.name", self.agent_name)
+            if not span.attributes.get("gen_ai.agent.id"):
+                span.set_attribute("gen_ai.agent.id", self.agent_name)
+
         # Set provider name if not already set
         if not span.attributes.get("gen_ai.provider.name"):
             span.set_attribute("gen_ai.provider.name", self.provider_name)
@@ -152,6 +163,7 @@ def configure_telemetry(
     service_name: str = "customer-agent",
     application_insights_connection_string: Optional[str] = None,
     provider_name: str = "azure.ai.inference",
+    agent_name: Optional[str] = None,
 ) -> trace.Tracer:
     """
     Configure OpenTelemetry with Azure Monitor Application Insights.
@@ -167,6 +179,7 @@ def configure_telemetry(
         service_name: Name of the service for telemetry identification
         application_insights_connection_string: Azure Application Insights connection string
         provider_name: Gen AI provider name per semantic conventions
+        agent_name: Name of the AI agent for gen_ai.agent.name/id attributes
 
     Returns:
         Configured OpenTelemetry tracer
@@ -207,7 +220,7 @@ def configure_telemetry(
 
     # Add Gen AI span processor
     tracer_provider.add_span_processor(
-        GenAISpanProcessor(service_name=service_name, provider_name=provider_name)
+        GenAISpanProcessor(service_name=service_name, provider_name=provider_name, agent_name=agent_name)
     )
 
     # Configure Azure Monitor exporter if connection string is available

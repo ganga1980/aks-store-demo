@@ -64,6 +64,7 @@ settings = get_settings()
 tracer = configure_telemetry(
     service_name=settings.otel_service_name,
     application_insights_connection_string=settings.applicationinsights_connection_string,
+    agent_name=settings.agent_name,
 )
 gen_ai_telemetry = get_gen_ai_telemetry()
 
@@ -174,6 +175,10 @@ async def on_chat_start():
     Creates a new conversation thread and sends a welcome message.
     """
     with tracer.start_as_current_span("chat_session_start") as span:
+        # Set agent identification attributes for correlation
+        span.set_attribute("gen_ai.agent.name", settings.agent_name)
+        span.set_attribute("gen_ai.agent.id", settings.agent_name)
+
         try:
             # Get or create the agent
             agent = await get_agent()
@@ -253,6 +258,9 @@ async def on_message(message: cl.Message):
     Processes the message through the AI agent and streams the response.
     """
     with tracer.start_as_current_span("process_user_message") as span:
+        # Set agent identification attributes for correlation
+        span.set_attribute("gen_ai.agent.name", settings.agent_name)
+        span.set_attribute("gen_ai.agent.id", settings.agent_name)
         span.set_attribute("message.content_length", len(message.content))
         query_start_time = time.time()
 
