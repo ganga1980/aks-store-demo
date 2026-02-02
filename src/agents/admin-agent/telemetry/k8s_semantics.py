@@ -117,6 +117,16 @@ def get_k8s_attributes() -> Dict[str, Any]:
     if deployment_name:
         attrs[K8sAttributes.DEPLOYMENT_NAME] = deployment_name
 
+    # ReplicaSet name - derived from pod name for deployment workloads
+    # In Kubernetes, pod names follow the pattern: <deployment-name>-<replicaset-hash>-<pod-hash>
+    # e.g., my-deployment-5d8c7b6f9-abc123 -> my-deployment-5d8c7b6f9
+    # Only extract if we detected a deployment (has deployment name)
+    if pod_name and deployment_name:
+        parts = pod_name.rsplit("-", 1)
+        if len(parts) >= 2:
+            replicaset_name = parts[0]  # Everything except the pod hash
+            attrs[K8sAttributes.REPLICASET_NAME] = replicaset_name
+
     # Container attributes
     container_name = os.getenv("CONTAINER_NAME")
     if container_name:

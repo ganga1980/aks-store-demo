@@ -37,8 +37,15 @@ from business_events import (
     CustomerEvent,
     AdminEvent,
     AIEvent,
+    AgentSessionEvent,
+    AgentTaskEvent,
+    AgentModelInvocationEvent,
+    AgentToolCallEvent,
     EventType,
     EventSource,
+    create_agent_session_started_event,
+    create_agent_session_ended_event,
+    create_agent_tool_call_event,
 )
 from telemetry_client import BusinessTelemetryClient
 from fabric_sinks import ConsoleSink, FileSink, EventHubSink, OneLakeSink
@@ -494,6 +501,234 @@ async def emit_ai_content_generated(
         latency_ms=latency_ms,
         **kwargs
     )
+
+
+# ========================================
+# Agent Session Events (Fabric-Pulse Ontology)
+# ========================================
+
+async def emit_agent_session_started(
+    agent_name: str,
+    session_id: str,
+    cluster_id: Optional[str] = None,
+    namespace: Optional[str] = None,
+    pod_name: Optional[str] = None,
+    node_name: Optional[str] = None,
+    replicaset_name: Optional[str] = None,
+    deployment_name: Optional[str] = None,
+    customer_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    **kwargs
+) -> bool:
+    """
+    Emit an agent session started event with Fabric-Pulse foreign keys.
+
+    This event creates proper entity keys for correlation:
+    - AgentId: {ClusterId}/{Namespace}/agents/{AgentName}
+    - AgentSessionId: {AgentId}/sessions/{SessionId}
+    - WorkloadId: {ClusterId}/{Namespace}/{ControllerName}
+
+    Call this when an agent chat session begins.
+
+    Args:
+        agent_name: Human-readable agent name (e.g., "customer-agent")
+        session_id: Unique session/thread identifier
+        cluster_id: Kubernetes cluster resource ID (cloud.resource_id)
+        namespace: Kubernetes namespace (k8s.namespace.name)
+        pod_name: Pod name (k8s.pod.name)
+        node_name: Node name (k8s.node.name)
+        replicaset_name: ReplicaSet name (k8s.replicaset.name)
+        deployment_name: Deployment name (k8s.deployment.name)
+        customer_id: Customer identifier for customer-agent sessions
+        trace_id: OpenTelemetry trace ID for correlation
+
+    Returns:
+        True if event was emitted successfully
+    """
+    if not _client:
+        logger.warning("Telemetry client not initialized")
+        return False
+
+    source = _client.default_source or EventSource.CUSTOMER_AGENT
+    event = create_agent_session_started_event(
+        agent_name=agent_name,
+        session_id=session_id,
+        source=source,
+        cluster_id=cluster_id,
+        namespace=namespace,
+        pod_name=pod_name,
+        node_name=node_name,
+        replicaset_name=replicaset_name,
+        deployment_name=deployment_name,
+        customer_id=customer_id,
+        trace_id=trace_id,
+        **kwargs
+    )
+    return await _client.emit(event)
+
+
+async def emit_agent_session_ended(
+    agent_name: str,
+    session_id: str,
+    duration_ms: int,
+    status: str = "Completed",
+    cluster_id: Optional[str] = None,
+    namespace: Optional[str] = None,
+    pod_name: Optional[str] = None,
+    # Business outcomes
+    tool_call_count: Optional[int] = None,
+    model_invocation_count: Optional[int] = None,
+    total_input_tokens: Optional[int] = None,
+    total_output_tokens: Optional[int] = None,
+    message_count: Optional[int] = None,
+    orders_placed: Optional[int] = None,
+    revenue_generated: Optional[float] = None,
+    products_viewed: Optional[int] = None,
+    inventory_updates: Optional[int] = None,
+    # Error info
+    error_occurred: bool = False,
+    error_type: Optional[str] = None,
+    error_message: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    **kwargs
+) -> bool:
+    """
+    Emit an agent session ended event with business outcomes.
+
+    This event captures the complete session lifecycle including
+    business impact metrics for correlation with orders, products, etc.
+
+    Call this when an agent chat session ends.
+
+    Args:
+        agent_name: Human-readable agent name
+        session_id: Unique session/thread identifier
+        duration_ms: Session duration in milliseconds
+        status: Session status (Completed, Error, Abandoned, Timeout)
+        cluster_id: Kubernetes cluster resource ID
+        namespace: Kubernetes namespace
+        pod_name: Pod name
+        tool_call_count: Number of MCP tool calls made
+        model_invocation_count: Number of LLM invocations
+        total_input_tokens: Total input tokens consumed
+        total_output_tokens: Total output tokens generated
+        message_count: Number of user messages
+        orders_placed: Number of orders placed during session
+        revenue_generated: Revenue generated during session
+        products_viewed: Number of products viewed
+        inventory_updates: Number of inventory updates (admin-agent)
+        error_occurred: Whether an error occurred
+        error_type: Type of error if any
+        error_message: Error message if any
+        trace_id: OpenTelemetry trace ID
+
+    Returns:
+        True if event was emitted successfully
+    """
+    if not _client:
+        logger.warning("Telemetry client not initialized")
+        return False
+
+    source = _client.default_source or EventSource.CUSTOMER_AGENT
+    event = create_agent_session_ended_event(
+        agent_name=agent_name,
+        session_id=session_id,
+        source=source,
+        duration_ms=duration_ms,
+        status=status,
+        cluster_id=cluster_id,
+        namespace=namespace,
+        pod_name=pod_name,
+        tool_call_count=tool_call_count,
+        model_invocation_count=model_invocation_count,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        message_count=message_count,
+        orders_placed=orders_placed,
+        revenue_generated=revenue_generated,
+        products_viewed=products_viewed,
+        inventory_updates=inventory_updates,
+        error_occurred=error_occurred,
+        error_type=error_type,
+        error_message=error_message,
+        trace_id=trace_id,
+        **kwargs
+    )
+    return await _client.emit(event)
+
+
+async def emit_agent_tool_call(
+    tool_name: str,
+    agent_name: str,
+    session_id: str,
+    duration_ms: int,
+    status: str = "Success",
+    cluster_id: Optional[str] = None,
+    namespace: Optional[str] = None,
+    tool_call_id: Optional[str] = None,
+    tool_server: Optional[str] = None,
+    tool_category: Optional[str] = None,
+    affected_entity_type: Optional[str] = None,
+    affected_entity_id: Optional[str] = None,
+    error_type: Optional[str] = None,
+    error_message: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    span_id: Optional[str] = None,
+    **kwargs
+) -> bool:
+    """
+    Emit an agent tool call event for business impact tracking.
+
+    Call this when an MCP tool is executed to track which
+    business entities are affected.
+
+    Args:
+        tool_name: Name of the tool (e.g., "get_products", "place_order")
+        agent_name: Agent that executed the tool
+        session_id: Session identifier
+        duration_ms: Tool execution duration
+        status: Execution status (Success, Failed, Timeout)
+        cluster_id: Kubernetes cluster resource ID
+        namespace: Kubernetes namespace
+        tool_call_id: Unique tool call identifier
+        tool_server: MCP server hosting the tool
+        tool_category: Tool category (ProductService, OrderService)
+        affected_entity_type: Type of entity affected (Product, Order)
+        affected_entity_id: ID of affected entity
+        error_type: Error type if failed
+        error_message: Error message if failed
+        trace_id: OpenTelemetry trace ID
+        span_id: OpenTelemetry span ID
+
+    Returns:
+        True if event was emitted successfully
+    """
+    if not _client:
+        logger.warning("Telemetry client not initialized")
+        return False
+
+    source = _client.default_source or EventSource.CUSTOMER_AGENT
+    event = create_agent_tool_call_event(
+        tool_name=tool_name,
+        agent_name=agent_name,
+        session_id=session_id,
+        source=source,
+        duration_ms=duration_ms,
+        status=status,
+        cluster_id=cluster_id,
+        namespace=namespace,
+        tool_call_id=tool_call_id,
+        tool_server=tool_server,
+        tool_category=tool_category,
+        affected_entity_type=affected_entity_type,
+        affected_entity_id=affected_entity_id,
+        error_type=error_type,
+        error_message=error_message,
+        trace_id=trace_id,
+        span_id=span_id,
+        **kwargs
+    )
+    return await _client.emit(event)
 
 
 # ========================================

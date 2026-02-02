@@ -24,6 +24,7 @@ from opentelemetry import trace
 
 from config import get_settings
 from telemetry import configure_telemetry, get_tracer, get_gen_ai_telemetry
+from telemetry.k8s_semantics import get_k8s_attributes, get_cloud_attributes, is_running_in_kubernetes
 from agent import AdminAgent
 from agent.tools import set_business_context
 
@@ -46,6 +47,9 @@ try:
         emit_session_started,
         emit_session_ended,
         emit_customer_query,
+        emit_agent_session_started,
+        emit_agent_session_ended,
+        emit_agent_tool_call,
     )
     BUSINESS_TELEMETRY_AVAILABLE = True
 except ImportError as e:
@@ -71,6 +75,52 @@ gen_ai_telemetry = get_gen_ai_telemetry()
 # Global agent instance (shared across sessions, each session has its own thread)
 _agent: AdminAgent | None = None
 _business_telemetry_initialized = False
+
+# Cache K8s context for business events (loaded once at startup)
+_k8s_business_context: dict = {}
+
+
+def _load_k8s_business_context() -> dict:
+    """
+    Load K8s context for Fabric-Pulse business events.
+
+    Returns dict with:
+    - cluster_id: cloud.resource_id (CLUSTER_RESOURCE_ID env var)
+    - namespace: k8s.namespace.name (POD_NAMESPACE env var)
+    - pod_name: k8s.pod.name (POD_NAME env var)
+    - node_name: k8s.node.name (NODE_NAME env var)
+    - replicaset_name: k8s.replicaset.name (derived from pod name)
+    - deployment_name: k8s.deployment.name (DEPLOYMENT_NAME or derived)
+    """
+    global _k8s_business_context
+    if _k8s_business_context:
+        return _k8s_business_context
+
+    if is_running_in_kubernetes():
+        k8s_attrs = get_k8s_attributes()
+        cloud_attrs = get_cloud_attributes()
+
+        _k8s_business_context = {
+            "cluster_id": cloud_attrs.get("cloud.resource_id", os.getenv("CLUSTER_RESOURCE_ID")),
+            "namespace": k8s_attrs.get("k8s.namespace.name", os.getenv("POD_NAMESPACE")),
+            "pod_name": k8s_attrs.get("k8s.pod.name", os.getenv("POD_NAME")),
+            "node_name": k8s_attrs.get("k8s.node.name", os.getenv("NODE_NAME")),
+            "replicaset_name": k8s_attrs.get("k8s.replicaset.name"),
+            "deployment_name": k8s_attrs.get("k8s.deployment.name", os.getenv("DEPLOYMENT_NAME")),
+        }
+    else:
+        # Development mode - use placeholder values
+        _k8s_business_context = {
+            "cluster_id": "local-dev",
+            "namespace": "default",
+            "pod_name": "admin-agent-dev",
+            "node_name": "local-node",
+            "replicaset_name": None,
+            "deployment_name": "admin-agent",
+        }
+
+    logger.debug(f"K8s business context loaded: {_k8s_business_context}")
+    return _k8s_business_context
 
 
 # -----------------------------------------------------------------------------
@@ -212,10 +262,31 @@ async def on_chat_start():
             # === BUSINESS TELEMETRY: Admin Session Started ===
             if BUSINESS_TELEMETRY_AVAILABLE:
                 try:
+                    # Get K8s context for proper foreign key generation
+                    k8s_ctx = _load_k8s_business_context()
+                    trace_id = None
+                    current_span = trace.get_current_span()
+                    if current_span and current_span.get_span_context().is_valid:
+                        trace_id = format(current_span.get_span_context().trace_id, '032x')
+
+                    # Emit new Fabric-Pulse compliant event
+                    await emit_agent_session_started(
+                        agent_name=settings.agent_name,
+                        session_id=thread_id,
+                        cluster_id=k8s_ctx.get("cluster_id"),
+                        namespace=k8s_ctx.get("namespace"),
+                        pod_name=k8s_ctx.get("pod_name"),
+                        node_name=k8s_ctx.get("node_name"),
+                        replicaset_name=k8s_ctx.get("replicaset_name"),
+                        deployment_name=k8s_ctx.get("deployment_name"),
+                        customer_id="admin",  # Admin sessions don't have customer_id
+                        trace_id=trace_id,
+                    )
+                    # Also emit legacy event for backward compatibility
                     await emit_session_started(session_id=thread_id, user_id="admin")
                 except Exception as e:
                     logger.debug(f"Business telemetry session_started skipped: {e}")
-            # =================================================
+            # =========================================================================
 
             # Send welcome message
             welcome_message = """# 🛠️ Pet Store Admin Console
@@ -355,6 +426,41 @@ async def on_chat_end():
                 session_start = cl.user_session.get("session_start_time")
                 interaction_count = cl.user_session.get("interaction_count", 0)
                 duration_ms = int((time.time() - session_start) * 1000) if session_start else None
+
+                # Get K8s context for proper foreign key generation
+                k8s_ctx = _load_k8s_business_context()
+
+                # Get session metrics if tracked
+                tool_call_count = cl.user_session.get("tool_call_count", 0)
+                model_invocation_count = cl.user_session.get("model_invocation_count", 0)
+                total_input_tokens = cl.user_session.get("total_input_tokens", 0)
+                total_output_tokens = cl.user_session.get("total_output_tokens", 0)
+                inventory_updates = cl.user_session.get("inventory_updates", 0)
+                error_occurred = cl.user_session.get("error_occurred", False)
+                error_type = cl.user_session.get("error_type")
+
+                # Emit new Fabric-Pulse compliant event with business outcomes
+                await emit_agent_session_ended(
+                    agent_name=settings.agent_name,
+                    session_id=thread_id,
+                    duration_ms=duration_ms,
+                    status="Completed" if not error_occurred else "Error",
+                    cluster_id=k8s_ctx.get("cluster_id"),
+                    namespace=k8s_ctx.get("namespace"),
+                    pod_name=k8s_ctx.get("pod_name"),
+                    # Business outcomes
+                    tool_call_count=tool_call_count,
+                    model_invocation_count=model_invocation_count,
+                    total_input_tokens=total_input_tokens,
+                    total_output_tokens=total_output_tokens,
+                    message_count=interaction_count,
+                    inventory_updates=inventory_updates,
+                    # Error info
+                    error_occurred=error_occurred,
+                    error_type=error_type,
+                )
+
+                # Also emit legacy event for backward compatibility
                 await emit_session_ended(
                     session_id=thread_id,
                     duration_ms=duration_ms,
@@ -363,7 +469,7 @@ async def on_chat_end():
                 )
             except Exception as e:
                 logger.debug(f"Business telemetry session_ended skipped: {e}")
-        # ==============================================
+        # ======================================================================
 
 
 @cl.on_stop
