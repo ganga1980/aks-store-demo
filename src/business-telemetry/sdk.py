@@ -117,10 +117,54 @@ def set_telemetry_context(
         )
 
 
+def set_infrastructure_context(
+    agent_id: Optional[str] = None,
+    agent_session_id: Optional[str] = None,
+    workload_id: Optional[str] = None,
+    cluster_id: Optional[str] = None,
+    namespace: Optional[str] = None,
+    pod_name: Optional[str] = None,
+    deployment_name: Optional[str] = None,
+):
+    """
+    Set Fabric-Pulse infrastructure context for correlation.
+
+    These fields enable correlation between business events and
+    infrastructure/agent entities in Fabric-Pulse Ontology.
+
+    All subsequent business events will include these fields automatically.
+
+    Args:
+        agent_id: AgentId format: {ClusterId}/{Namespace}/agents/{AgentName}
+        agent_session_id: AgentSessionId format: {AgentId}/sessions/{SessionId}
+        workload_id: WorkloadId format: {ClusterId}/{Namespace}/{ControllerName}
+        cluster_id: Azure resource ID of the AKS cluster (cloud.resource_id)
+        namespace: Kubernetes namespace (k8s.namespace.name)
+        pod_name: Kubernetes pod name (k8s.pod.name)
+        deployment_name: Kubernetes deployment name (k8s.deployment.name)
+    """
+    if _client:
+        _client.set_infrastructure_context(
+            agent_id=agent_id,
+            agent_session_id=agent_session_id,
+            workload_id=workload_id,
+            cluster_id=cluster_id,
+            namespace=namespace,
+            pod_name=pod_name,
+            deployment_name=deployment_name,
+        )
+
+
 def clear_telemetry_context():
     """Clear the current telemetry context."""
     if _client:
         _client.clear_context()
+
+
+def clear_infrastructure_context():
+    """Clear the infrastructure context."""
+    if _client:
+        _client.clear_infrastructure_context()
 
 
 # ========================================
@@ -410,6 +454,33 @@ async def emit_product_created(
         admin_user=admin_user,
         ai_assisted=ai_assisted,
         ai_content=ai_content,
+        **kwargs
+    )
+
+
+async def emit_product_creation_failed(
+    product_name: str,
+    error_message: str,
+    error_code: Optional[str] = None,
+    admin_user: Optional[str] = None,
+    ai_assisted: bool = False,
+    **kwargs
+) -> bool:
+    """
+    Emit a product creation failed event.
+
+    Call when product creation fails due to an error.
+    """
+    if not _client:
+        logger.warning("Telemetry client not initialized")
+        return False
+
+    return await _client.emit_product_creation_failed(
+        product_name=product_name,
+        error_message=error_message,
+        error_code=error_code,
+        admin_user=admin_user,
+        ai_assisted=ai_assisted,
         **kwargs
     )
 

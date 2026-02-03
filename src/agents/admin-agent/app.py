@@ -44,6 +44,7 @@ try:
     from sdk import (
         init_telemetry as init_business_telemetry,
         shutdown_telemetry as shutdown_business_telemetry,
+        set_infrastructure_context,
         emit_session_started,
         emit_session_ended,
         emit_customer_query,
@@ -209,8 +210,23 @@ async def get_agent() -> AdminAgent:
     if not _business_telemetry_initialized and BUSINESS_TELEMETRY_AVAILABLE:
         try:
             await init_business_telemetry()
+
+            # Set infrastructure context for all business events (Fabric-Pulse correlation)
+            k8s_ctx = _load_k8s_business_context()
+            agent_id = f"{k8s_ctx.get('cluster_id', 'unknown')}/{k8s_ctx.get('namespace', 'default')}/agents/{settings.agent_name}"
+            workload_id = f"{k8s_ctx.get('cluster_id', 'unknown')}/{k8s_ctx.get('namespace', 'default')}/{k8s_ctx.get('deployment_name', settings.agent_name)}"
+
+            set_infrastructure_context(
+                agent_id=agent_id,
+                workload_id=workload_id,
+                cluster_id=k8s_ctx.get("cluster_id"),
+                namespace=k8s_ctx.get("namespace"),
+                pod_name=k8s_ctx.get("pod_name"),
+                deployment_name=k8s_ctx.get("deployment_name"),
+            )
+
             _business_telemetry_initialized = True
-            logger.info("Business telemetry initialized")
+            logger.info(f"Business telemetry initialized with infrastructure context: agent_id={agent_id}")
         except Exception as e:
             logger.warning(f"Failed to initialize business telemetry: {e}")
 

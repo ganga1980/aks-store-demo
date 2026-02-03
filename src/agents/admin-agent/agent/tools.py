@@ -53,6 +53,7 @@ try:
         emit_product_viewed,
         emit_products_listed,
         emit_product_created,
+        emit_product_creation_failed,
         emit_product_updated,
         emit_order_status_checked,
         emit_order_completed,
@@ -425,11 +426,25 @@ def add_product(
                 )
                 # ===========================================
             else:
+                error_msg = result_data.get("error", "Unknown error")
+                error_detail = result_data.get("detail", "")
                 result = json.dumps({
                     "success": False,
-                    "error": result_data.get("error", "Unknown error"),
+                    "error": error_msg,
                     "message": f"❌ Failed to add product '{name}'."
                 })
+
+                # === BUSINESS TELEMETRY: Product Creation Failed ===
+                _emit_business_event_sync(
+                    emit_product_creation_failed(
+                        product_name=name,
+                        error_message=f"{error_msg}: {error_detail}" if error_detail else error_msg,
+                        error_code="500" if "500" in str(error_msg) else None,
+                        admin_user=_business_context.get("admin_user"),
+                        ai_assisted=True,
+                    )
+                )
+                # ==================================================
 
             telemetry.set_tool_call_attributes(span, result=result)
             duration = time.perf_counter() - start_time

@@ -102,6 +102,15 @@ class BusinessTelemetryClient:
         self._user_id: Optional[str] = None
         self._correlation_id: Optional[str] = None
 
+        # Fabric-Pulse infrastructure context for correlation
+        self._agent_id: Optional[str] = None
+        self._agent_session_id: Optional[str] = None
+        self._workload_id: Optional[str] = None
+        self._cluster_id: Optional[str] = None
+        self._namespace: Optional[str] = None
+        self._pod_name: Optional[str] = None
+        self._deployment_name: Optional[str] = None
+
         self._started = False
 
     @classmethod
@@ -238,11 +247,61 @@ class BusinessTelemetryClient:
         if correlation_id is not None:
             self._correlation_id = correlation_id
 
+    def set_infrastructure_context(
+        self,
+        agent_id: Optional[str] = None,
+        agent_session_id: Optional[str] = None,
+        workload_id: Optional[str] = None,
+        cluster_id: Optional[str] = None,
+        namespace: Optional[str] = None,
+        pod_name: Optional[str] = None,
+        deployment_name: Optional[str] = None,
+    ):
+        """
+        Set Fabric-Pulse infrastructure context for correlation.
+
+        These fields enable correlation between business events and
+        infrastructure/agent entities in Fabric-Pulse Ontology.
+
+        Args:
+            agent_id: AgentId format: {ClusterId}/{Namespace}/agents/{AgentName}
+            agent_session_id: AgentSessionId format: {AgentId}/sessions/{SessionId}
+            workload_id: WorkloadId format: {ClusterId}/{Namespace}/{ControllerName}
+            cluster_id: Azure resource ID of the AKS cluster (cloud.resource_id)
+            namespace: Kubernetes namespace (k8s.namespace.name)
+            pod_name: Kubernetes pod name (k8s.pod.name)
+            deployment_name: Kubernetes deployment name (k8s.deployment.name)
+        """
+        if agent_id is not None:
+            self._agent_id = agent_id
+        if agent_session_id is not None:
+            self._agent_session_id = agent_session_id
+        if workload_id is not None:
+            self._workload_id = workload_id
+        if cluster_id is not None:
+            self._cluster_id = cluster_id
+        if namespace is not None:
+            self._namespace = namespace
+        if pod_name is not None:
+            self._pod_name = pod_name
+        if deployment_name is not None:
+            self._deployment_name = deployment_name
+
     def clear_context(self):
         """Clear the current context."""
         self._session_id = None
         self._user_id = None
         self._correlation_id = None
+
+    def clear_infrastructure_context(self):
+        """Clear the infrastructure context."""
+        self._agent_id = None
+        self._agent_session_id = None
+        self._workload_id = None
+        self._cluster_id = None
+        self._namespace = None
+        self._pod_name = None
+        self._deployment_name = None
 
     @asynccontextmanager
     async def session_context(
@@ -276,6 +335,7 @@ class BusinessTelemetryClient:
 
     def _enrich_event(self, event: BaseEvent) -> BaseEvent:
         """Add context and defaults to event."""
+        # Session/user context
         if not event.session_id and self._session_id:
             event.session_id = self._session_id
         if not event.user_id and self._user_id:
@@ -284,6 +344,22 @@ class BusinessTelemetryClient:
             event.correlation_id = self._correlation_id
         if not event.event_source and self.default_source:
             event.event_source = self.default_source.value
+
+        # Fabric-Pulse infrastructure context
+        if not event.agent_id and self._agent_id:
+            event.agent_id = self._agent_id
+        if not event.agent_session_id and self._agent_session_id:
+            event.agent_session_id = self._agent_session_id
+        if not event.workload_id and self._workload_id:
+            event.workload_id = self._workload_id
+        if not event.cluster_id and self._cluster_id:
+            event.cluster_id = self._cluster_id
+        if not event.namespace and self._namespace:
+            event.namespace = self._namespace
+        if not event.pod_name and self._pod_name:
+            event.pod_name = self._pod_name
+        if not event.deployment_name and self._deployment_name:
+            event.deployment_name = self._deployment_name
 
         event.environment = self.environment
         event.service_version = self.service_version
@@ -541,6 +617,27 @@ class BusinessTelemetryClient:
             admin_user=admin_user,
             ai_assisted=ai_assisted,
             ai_generated_content=ai_content,
+            **kwargs
+        )
+        return await self.emit(event)
+
+    async def emit_product_creation_failed(
+        self,
+        product_name: str,
+        error_message: str,
+        error_code: Optional[str] = None,
+        admin_user: Optional[str] = None,
+        ai_assisted: bool = False,
+        **kwargs
+    ) -> bool:
+        """Emit product creation failed event."""
+        event = AdminEvent(
+            event_type=EventType.PRODUCT_CREATION_FAILED.value,
+            product_name=product_name,
+            admin_user=admin_user,
+            ai_assisted=ai_assisted,
+            change_reason=error_message,
+            change_description=f"Error Code: {error_code}" if error_code else None,
             **kwargs
         )
         return await self.emit(event)

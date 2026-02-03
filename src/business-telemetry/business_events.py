@@ -43,6 +43,7 @@ class EventType(str, Enum):
     # Admin Events
     INVENTORY_UPDATED = "admin.inventory_updated"
     PRODUCT_CREATED = "admin.product_created"
+    PRODUCT_CREATION_FAILED = "admin.product_creation_failed"
     PRODUCT_UPDATED = "admin.product_updated"
     PRODUCT_DELETED = "admin.product_deleted"
 
@@ -78,6 +79,11 @@ class BaseEvent:
 
     Follows Microsoft CDM (Common Data Model) conventions for
     compatibility with Fabric Ontology.
+
+    Includes Fabric-Pulse Ontology foreign keys for correlation:
+    - AgentId: {ClusterId}/{Namespace}/agents/{AgentName}
+    - AgentSessionId: {AgentId}/sessions/{SessionId}
+    - WorkloadId: {ClusterId}/{Namespace}/{ControllerName}
     """
 
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -89,6 +95,21 @@ class BaseEvent:
     correlation_id: Optional[str] = None
     session_id: Optional[str] = None
     user_id: Optional[str] = None
+
+    # === FABRIC-PULSE ONTOLOGY FOREIGN KEYS ===
+    # These fields enable correlation with infrastructure and agent entities
+    # AgentId format: {ClusterId}/{Namespace}/agents/{AgentName}
+    agent_id: Optional[str] = None
+    # AgentSessionId format: {AgentId}/sessions/{SessionId}
+    agent_session_id: Optional[str] = None
+    # WorkloadId format: {ClusterId}/{Namespace}/{ControllerName}
+    workload_id: Optional[str] = None
+
+    # === INFRASTRUCTURE CONTEXT ===
+    cluster_id: Optional[str] = None  # cloud.resource_id (Azure resource ID of AKS cluster)
+    namespace: Optional[str] = None  # k8s.namespace.name
+    pod_name: Optional[str] = None  # k8s.pod.name
+    deployment_name: Optional[str] = None  # k8s.deployment.name
 
     # Environment context
     environment: str = "production"
