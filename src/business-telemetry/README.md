@@ -199,6 +199,87 @@ async with client.session_context(session_id="sess-123") as ctx:
 await client.stop()
 ```
 
+## Microsoft 365 Agents SDK Integration
+
+The Business Telemetry service supports integration with Microsoft 365 Agents SDK for unique agent identification. This enables consistent `gen_ai.agent.id` attribute across all business telemetry events.
+
+### Setup
+
+1. **Install M365 Agents SDK packages** (already included in requirements.txt):
+
+   ```bash
+   pip install microsoft-agents-activity>=0.7.0 microsoft-agents-hosting-core>=0.7.0
+   ```
+
+2. **Configure environment variables**:
+   ```bash
+   # Required for unique agent ID generation
+   export AZURE_TENANT_ID=your-azure-tenant-id
+   export AZURE_CLIENT_ID=your-azure-client-id
+   ```
+
+### Usage with M365 Agent IDs
+
+```python
+from sdk import (
+    init_telemetry,
+    init_m365_agent_context,
+    emit_agent_session_started,
+    emit_agent_session_ended,
+    emit_agent_tool_call,
+    get_gen_ai_agent_id,
+)
+
+# Initialize telemetry client
+await init_telemetry()
+
+# Initialize M365 agent context for unique agent ID
+provider = init_m365_agent_context(
+    agent_name="customer-agent",
+    agent_type="customer",
+    channel_id="webchat",
+)
+
+# The agent ID is now a unique UUID
+print(f"M365 Agent ID: {provider.agent_id}")
+# Output: M365 Agent ID: 550e8400-e29b-41d4-a716-446655440000
+
+# Emit events with automatic M365 agent ID
+await emit_agent_session_started(
+    agent_name="customer-agent",
+    session_id="sess-123",
+    # m365_agent_id is automatically populated from the global provider
+)
+
+# Or explicitly pass the M365 agent ID
+await emit_agent_tool_call(
+    tool_name="get_products",
+    agent_name="customer-agent",
+    session_id="sess-123",
+    duration_ms=150,
+    m365_agent_id=provider.agent_id,  # Explicit M365 agent ID
+)
+
+# Get the M365 agent ID anywhere in your code
+agent_id = get_gen_ai_agent_id()
+```
+
+### Agent ID Generation
+
+The M365 agent ID is a deterministic UUID generated from:
+
+- Agent name (e.g., "customer-agent")
+- Agent type (e.g., "customer", "admin", "telemetry")
+- Azure Tenant ID (from `AZURE_TENANT_ID`)
+- Azure Client ID (from `AZURE_CLIENT_ID`)
+- Pod name or hostname (for instance uniqueness)
+
+This ensures:
+
+- **Consistency**: Same agent configuration produces the same ID
+- **Uniqueness**: Different instances can be distinguished
+- **Correlation**: Events can be correlated across services using the UUID
+
 ## Configuration Reference
 
 | Environment Variable       | Description                                  | Default              |

@@ -15,6 +15,8 @@ data:
   AZURE_AI_MODEL_DEPLOYMENT_NAME: "gpt-4o"
 
   # Authentication - Use Workload Identity
+  AZURE_TENANT_ID: "72f988bf-86f1-41af-91ab-2d7cd011db47"
+  AZURE_CLIENT_ID: "5b26b93a-8b7d-40c7-b8aa-ede25c78e9e6"
   USE_WORKLOAD_IDENTITY_AUTH: "true"
 
   # Backend Service URLs (internal cluster DNS)

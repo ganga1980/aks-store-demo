@@ -9,6 +9,7 @@ Components:
 - otel_setup: Core OpenTelemetry configuration with Azure Monitor
 - gen_ai_semantics: Gen AI semantic conventions implementation
 - k8s_semantics: Kubernetes and cloud semantic conventions
+- m365_agent_integration: Microsoft 365 Agents SDK integration for agent IDs
 
 Signals implemented:
 - Spans: create_agent, invoke_agent, execute_tool operations
@@ -16,6 +17,7 @@ Signals implemented:
 - Attributes: Full Gen AI attribute set per semantic conventions
 - K8s Attributes: Pod, node, deployment, cluster attributes
 - Cloud Attributes: Provider, platform, region, resource ID
+- M365 Agent Attributes: Unique agent ID, conversation ID, activity ID
 """
 
 from .gen_ai_semantics import (
@@ -40,6 +42,12 @@ from .k8s_semantics import (
     set_all_resource_attributes,
     set_cloud_attributes,
     set_k8s_attributes,
+)
+from .m365_agent_integration import (
+    M365AgentIdentity,
+    M365AgentIdProvider,
+    get_m365_agent_id_provider,
+    is_m365_sdk_available,
 )
 from .otel_setup import (
     configure_telemetry,
@@ -75,4 +83,9 @@ __all__ = [
     "set_cloud_attributes",
     "set_all_resource_attributes",
     "is_running_in_kubernetes",
+    # Microsoft 365 Agents SDK integration
+    "M365AgentIdentity",
+    "M365AgentIdProvider",
+    "get_m365_agent_id_provider",
+    "is_m365_sdk_available",
 ]

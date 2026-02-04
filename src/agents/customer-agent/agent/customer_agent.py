@@ -7,8 +7,10 @@ This module provides the main agent class that:
 - Creates and manages the AI agent with function tools
 - Handles conversation threads and message processing
 - Integrates with OpenTelemetry Gen AI semantic conventions for observability
+- Integrates with Microsoft 365 Agents SDK for unique agent identification
 
 Microsoft Agent Framework: https://github.com/microsoft/agent-framework
+Microsoft 365 Agents SDK: https://github.com/Microsoft/Agents-for-python
 OpenTelemetry Gen AI Semantic Conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
 """
 
@@ -28,6 +30,8 @@ from telemetry import (
     GenAIProviderName,
     get_gen_ai_telemetry,
     get_tracer,
+    get_m365_agent_id_provider,
+    is_m365_sdk_available,
 )
 
 from .tools import get_agent_tools
@@ -73,6 +77,29 @@ class CustomerAgent:
             service_name=self.settings.otel_service_name,
             provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
         )
+
+        # Initialize Microsoft 365 Agents SDK integration for unique agent ID
+        self.m365_agent_provider = get_m365_agent_id_provider(
+            agent_name=self.settings.agent_name,
+            agent_type="customer",
+            channel_id="webchat",
+            service_url=self.settings.azure_ai_project_endpoint,
+        )
+
+        # Log the unique agent ID from M365 SDK integration
+        logger.info(
+            f"Customer Agent initialized with M365 Agent ID: {self.m365_agent_provider.agent_id}, "
+            f"M365 SDK available: {is_m365_sdk_available()}"
+        )
+
+    @property
+    def agent_id(self) -> str:
+        """
+        Get the unique agent ID from Microsoft 365 Agents SDK integration.
+
+        This ID is stable across restarts and unique per agent configuration.
+        """
+        return self.m365_agent_provider.agent_id
 
     def _get_credential(self) -> Any:
         """
@@ -141,12 +168,16 @@ class CustomerAgent:
 
                 logger.info(f"Agent created with Microsoft Agent Framework: {self.settings.agent_name}")
 
-                # Set response attributes
-                span.set_attribute("gen_ai.agent.id", self.settings.agent_name)
+                # Set response attributes with M365 Agent ID
+                span.set_attribute("gen_ai.agent.id", self.agent_id)
+                span.set_attribute("gen_ai.agent.name", self.settings.agent_name)
                 span.set_attribute(
                     "gen_ai.agent.description",
                     "Handles customer interactions including product search, product recommendations, order placement, and order status inquiries. Impacts revenue and customer satisfaction.",
                 )
+
+                # Add M365 Agents SDK specific attributes to span
+                self.m365_agent_provider.set_otel_span_attributes(span)
 
                 # Record operation duration metric
                 duration = time.perf_counter() - start_time
@@ -213,9 +244,12 @@ class CustomerAgent:
 
         start_time = time.perf_counter()
 
+        # Create activity ID for this message using M365 SDK integration
+        activity_id = self.m365_agent_provider.create_activity_id(thread_id)
+
         with self.gen_ai_telemetry.invoke_agent_span(
             agent_name=self.settings.agent_name,
-            agent_id=self.settings.agent_name,
+            agent_id=self.agent_id,  # Use M365 unique agent ID
             model=self.settings.azure_ai_model_deployment_name,
             conversation_id=thread_id,
             server_endpoint=self.settings.azure_ai_project_endpoint,
@@ -224,6 +258,13 @@ class CustomerAgent:
             span.set_attribute(
                 "gen_ai.agent.description",
                 "Handles customer interactions including product search, product recommendations, order placement, and order status inquiries. Impacts revenue and customer satisfaction.",
+            )
+
+            # Add M365 Agents SDK specific attributes for this activity
+            self.m365_agent_provider.set_otel_span_attributes(
+                span,
+                conversation_id=thread_id,
+                activity_id=activity_id,
             )
 
             try:
@@ -318,7 +359,7 @@ class CustomerAgent:
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                         agent_name=self.settings.agent_name,
-                        agent_id=self.settings.agent_name,
+                        agent_id=self.agent_id,
                         conversation_id=thread_id,
                     )
                 )
@@ -333,7 +374,7 @@ class CustomerAgent:
                         input_tokens=input_tokens or 0,
                         output_tokens=output_tokens or 0,
                         agent_name=self.settings.agent_name,
-                        agent_id=self.settings.agent_name,
+                        agent_id=self.agent_id,
                         conversation_id=thread_id,
                     )
                 )
@@ -383,7 +424,7 @@ class CustomerAgent:
                 provider_name=GenAIProviderName.AZURE_AI_INFERENCE.value,
                 request_model=self.settings.azure_ai_model_deployment_name,
                 agent_name=self.settings.agent_name,
-                agent_id=self.settings.agent_name,
+                agent_id=self.agent_id,
                 conversation_id=thread_id,
             )
         )
@@ -391,7 +432,7 @@ class CustomerAgent:
 
         with self.gen_ai_telemetry.invoke_agent_span(
             agent_name=self.settings.agent_name,
-            agent_id=self.settings.agent_name,
+            agent_id=self.agent_id,
             model=self.settings.azure_ai_model_deployment_name,
             conversation_id=thread_id,
             server_endpoint=self.settings.azure_ai_project_endpoint,
@@ -499,7 +540,7 @@ class CustomerAgent:
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                         agent_name=self.settings.agent_name,
-                        agent_id=self.settings.agent_name,
+                        agent_id=self.agent_id,
                         conversation_id=thread_id,
                     )
                 )
@@ -514,7 +555,7 @@ class CustomerAgent:
                         input_tokens=input_tokens or 0,
                         output_tokens=output_tokens or 0,
                         agent_name=self.settings.agent_name,
-                        agent_id=self.settings.agent_name,
+                        agent_id=self.agent_id,
                         conversation_id=thread_id,
                     )
                 )
@@ -532,7 +573,7 @@ class CustomerAgent:
                         duration_seconds=duration,
                         error_type=type(e).__name__,
                         agent_name=self.settings.agent_name,
-                        agent_id=self.settings.agent_name,
+                        agent_id=self.agent_id,
                         conversation_id=thread_id,
                     )
                 )
@@ -544,7 +585,7 @@ class CustomerAgent:
                         request_model=self.settings.azure_ai_model_deployment_name,
                         error_type=type(e).__name__,
                         agent_name=self.settings.agent_name,
-                        agent_id=self.settings.agent_name,
+                        agent_id=self.agent_id,
                         conversation_id=thread_id,
                     )
                 )

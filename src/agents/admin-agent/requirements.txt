@@ -3,6 +3,12 @@
 agent-framework>=1.0.0b0
 azure-identity>=1.15.0
 
+# Microsoft 365 Agents SDK for enhanced agent identification
+# See: https://github.com/Microsoft/Agents-for-python
+# These packages provide Activity models and TurnContext for unique agent IDs
+microsoft-agents-activity>=0.7.0
+microsoft-agents-hosting-core>=0.7.0
+
 # Chainlit for conversational UI
 chainlit>=1.3.0
 

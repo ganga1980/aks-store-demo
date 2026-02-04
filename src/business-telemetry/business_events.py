@@ -728,6 +728,7 @@ def create_agent_session_started_event(
     deployment_name: Optional[str] = None,
     customer_id: Optional[str] = None,
     trace_id: Optional[str] = None,
+    m365_agent_id: Optional[str] = None,
     **kwargs
 ) -> AgentSessionEvent:
     """
@@ -745,6 +746,7 @@ def create_agent_session_started_event(
         deployment_name: Deployment name
         customer_id: Customer identifier (for customer-agent)
         trace_id: OpenTelemetry trace ID
+        m365_agent_id: M365 unique agent ID (UUID format). Takes precedence over built agent_id
 
     Returns:
         AgentSessionEvent with properly formatted foreign keys
@@ -755,7 +757,11 @@ def create_agent_session_started_event(
     workload_id = None
     pod_id = None
 
-    if cluster_id and namespace:
+    # Use M365 agent ID if provided (UUID format for gen_ai.agent.id)
+    if m365_agent_id:
+        agent_id = m365_agent_id
+        agent_session_id = f"{m365_agent_id}/sessions/{session_id}"
+    elif cluster_id and namespace:
         agent_id = AgentSessionEvent.build_agent_id(cluster_id, namespace, agent_name)
         agent_session_id = AgentSessionEvent.build_agent_session_id(agent_id, session_id)
 
@@ -826,6 +832,7 @@ def create_agent_session_ended_event(
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
     trace_id: Optional[str] = None,
+    m365_agent_id: Optional[str] = None,
     **kwargs
 ) -> AgentSessionEvent:
     """
@@ -833,12 +840,19 @@ def create_agent_session_ended_event(
 
     This event captures the complete session lifecycle including
     business impact metrics (orders, revenue, etc.) for correlation.
+
+    Args:
+        m365_agent_id: M365 unique agent ID (UUID format). Takes precedence over built agent_id
     """
     # Build entity foreign keys
     agent_id = None
     agent_session_id = None
 
-    if cluster_id and namespace:
+    # Use M365 agent ID if provided (UUID format for gen_ai.agent.id)
+    if m365_agent_id:
+        agent_id = m365_agent_id
+        agent_session_id = f"{m365_agent_id}/sessions/{session_id}"
+    elif cluster_id and namespace:
         agent_id = AgentSessionEvent.build_agent_id(cluster_id, namespace, agent_name)
         agent_session_id = AgentSessionEvent.build_agent_session_id(agent_id, session_id)
 
@@ -898,16 +912,24 @@ def create_agent_tool_call_event(
     error_message: Optional[str] = None,
     trace_id: Optional[str] = None,
     span_id: Optional[str] = None,
+    m365_agent_id: Optional[str] = None,
     **kwargs
 ) -> AgentToolCallEvent:
     """
     Create an agent tool call event for business impact tracking.
+
+    Args:
+        m365_agent_id: M365 unique agent ID (UUID format). Takes precedence over built agent_id
     """
     # Build entity foreign keys
     agent_id = None
     agent_session_id = None
 
-    if cluster_id and namespace:
+    # Use M365 agent ID if provided (UUID format for gen_ai.agent.id)
+    if m365_agent_id:
+        agent_id = m365_agent_id
+        agent_session_id = f"{m365_agent_id}/sessions/{session_id}"
+    elif cluster_id and namespace:
         agent_id = AgentSessionEvent.build_agent_id(cluster_id, namespace, agent_name)
         agent_session_id = AgentSessionEvent.build_agent_session_id(agent_id, session_id)
 

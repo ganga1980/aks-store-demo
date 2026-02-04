@@ -166,6 +166,7 @@ admin-agent/
 │   ├── __init__.py
 │   ├── gen_ai_semantics.py # Gen AI semantic conventions
 │   ├── k8s_semantics.py    # Kubernetes semantic conventions
+│   ├── m365_agent_integration.py  # Microsoft 365 Agents SDK integration
 │   └── otel_setup.py       # OpenTelemetry configuration
 ├── kubernetes/
 │   ├── admin-agent-*.yaml  # K8s manifests
@@ -198,7 +199,8 @@ The admin-agent implements OpenTelemetry Gen AI semantic conventions:
 
 ### Attributes
 
-- Gen AI attributes: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.agent.name`
+- Gen AI attributes: `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.agent.name`, `gen_ai.agent.id`
+- Microsoft 365 Agent SDK attributes: `m365.agent.id`, `m365.agent.type`, `m365.channel.id`, `m365.activity.id`
 - Kubernetes attributes: `k8s.pod.name`, `k8s.namespace.name`, `k8s.node.name`
 - Cloud attributes: `cloud.provider`, `cloud.platform`, `cloud.region`
 
@@ -230,5 +232,58 @@ Agent: ✅ Order abc123 status updated: Processing → Complete
 
 - [Customer Agent](../customer-agent/README.md) - Customer-facing agent for browsing and ordering
 - [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
+- [Microsoft 365 Agents SDK](https://github.com/Microsoft/Agents-for-python)
 - [Azure AI Foundry](https://azure.microsoft.com/products/ai-foundry/)
 - [OpenTelemetry Gen AI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+
+## Microsoft 365 Agents SDK Integration
+
+This agent integrates with the [Microsoft 365 Agents SDK](https://github.com/Microsoft/Agents-for-python) for enhanced agent identification. The integration provides:
+
+### Unique Agent ID
+
+Each agent instance receives a unique, stable identifier (UUID format) generated based on:
+
+- Agent name and type
+- Azure AD tenant ID (if configured)
+- Azure AD application ID (if configured)
+- Pod name (in Kubernetes) or hostname (local development)
+
+This ensures:
+
+- **Stability**: Same configuration produces the same agent ID
+- **Uniqueness**: Different agent instances/pods have distinct IDs
+- **Traceability**: Full correlation across distributed traces
+
+### Configuration
+
+To enable enhanced agent identification, set the following environment variables:
+
+```bash
+# Optional: Azure AD configuration for stable agent IDs
+AZURE_TENANT_ID=your-tenant-id
+AZURE_CLIENT_ID=your-client-id
+```
+
+When running on AKS with Workload Identity, these values are automatically available from the pod's identity.
+
+### Package Dependencies
+
+The integration uses the following Microsoft 365 Agents SDK packages:
+
+```
+microsoft-agents-activity>=0.7.0
+microsoft-agents-hosting-core>=0.7.0
+```
+
+> **Note**: The SDK is optional. If not installed, the agent will use a fallback ID generation mechanism and log a warning message.
+
+### Verifying the Integration
+
+Check the agent startup logs for the M365 Agent ID:
+
+```
+INFO - Admin Agent initialized with M365 Agent ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890, M365 SDK available: True
+```
+
+In your OTEL traces, look for the `m365.agent.id` and `gen_ai.agent.id` attributes.

@@ -241,13 +241,15 @@ async def on_chat_start():
     Creates a new conversation thread and sends a welcome message.
     """
     with tracer.start_as_current_span("chat_session_start") as span:
-        # Set agent identification attributes for correlation
+        # Set agent name attribute for correlation (agent_id set after agent creation)
         span.set_attribute("gen_ai.agent.name", settings.agent_name)
-        span.set_attribute("gen_ai.agent.id", settings.agent_name)
 
         try:
             # Get or create the agent
             agent = await get_agent()
+
+            # Set agent_id after agent is available (uses M365 unique agent ID)
+            span.set_attribute("gen_ai.agent.id", agent.agent_id)
 
             # Create a new thread for this session
             thread_id = await agent.create_thread()
@@ -271,7 +273,7 @@ async def on_chat_start():
             # === GOLDEN SIGNAL: Session Started (Saturation) ===
             gen_ai_telemetry.record_session_start(
                 agent_name=settings.agent_name,
-                agent_id=settings.agent_name,
+                agent_id=agent.agent_id,
             )
             # ===================================================
 
@@ -352,18 +354,22 @@ async def on_message(message: cl.Message):
     Processes the message through the AI agent and streams the response.
     """
     with tracer.start_as_current_span("process_user_message") as span:
-        # Set agent identification attributes for correlation
+        # Set agent name attribute for correlation
         span.set_attribute("gen_ai.agent.name", settings.agent_name)
-        span.set_attribute("gen_ai.agent.id", settings.agent_name)
         span.set_attribute("message.content_length", len(message.content))
         query_start_time = time.time()
 
         # Get thread ID from session
         thread_id = cl.user_session.get("thread_id")
 
+        # Get the agent first so we can use agent_id
+        agent = await get_agent()
+
+        # Set agent_id using M365 unique agent ID
+        span.set_attribute("gen_ai.agent.id", agent.agent_id)
+
         if not thread_id:
             # Session expired or invalid, create new thread
-            agent = await get_agent()
             thread_id = await agent.create_thread()
             cl.user_session.set("thread_id", thread_id)
             cl.user_session.set("session_start_time", time.time())
@@ -379,8 +385,6 @@ async def on_message(message: cl.Message):
         span.set_attribute("gen_ai.conversation.id", thread_id)
 
         try:
-            agent = await get_agent()
-
             # Create a message placeholder for streaming
             response_message = cl.Message(content="")
             await response_message.send()
@@ -429,10 +433,13 @@ async def on_chat_end():
     if thread_id:
         logger.info(f"Chat session ended for thread: {thread_id}")
 
+        # Get the agent to access the M365 agent ID
+        agent = await get_agent()
+
         # === GOLDEN SIGNAL: Session Ended (Saturation) ===
         gen_ai_telemetry.record_session_end(
             agent_name=settings.agent_name,
-            agent_id=settings.agent_name,
+            agent_id=agent.agent_id,
         )
         # =================================================
 

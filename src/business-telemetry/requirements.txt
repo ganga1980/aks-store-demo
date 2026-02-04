@@ -9,6 +9,11 @@ azure-eventhub>=5.11.0
 azure-storage-file-datalake>=12.14.0
 azure-identity>=1.15.0
 
+# Microsoft 365 Agents SDK for unique agent identification
+# https://github.com/Microsoft/Agents-for-python
+microsoft-agents-activity>=0.7.0
+microsoft-agents-hosting-core>=0.7.0
+
 # Optional: Parquet support for OneLake
 pyarrow>=14.0.0
 

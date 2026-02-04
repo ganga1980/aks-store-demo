@@ -27,6 +27,7 @@ from telemetry import (
     GenAIOperationName,
     GenAIProviderName,
     get_gen_ai_telemetry,
+    get_m365_agent_id_provider,
 )
 
 # Add business-telemetry SDK to path
@@ -67,6 +68,9 @@ _order_client: OrderServiceClient | None = None
 # Get Gen AI telemetry instance
 _gen_ai_telemetry = None
 
+# M365 Agent ID provider for unique agent identification
+_m365_agent_provider = None
+
 # Business telemetry context
 _business_context = {
     "session_id": None,
@@ -81,6 +85,31 @@ def _get_telemetry():
     if _gen_ai_telemetry is None:
         _gen_ai_telemetry = get_gen_ai_telemetry()
     return _gen_ai_telemetry
+
+
+def _get_m365_agent_provider():
+    """Get or create M365 Agent ID provider instance."""
+    global _m365_agent_provider
+    if _m365_agent_provider is None:
+        settings = get_settings()
+        _m365_agent_provider = get_m365_agent_id_provider(
+            agent_name=settings.agent_name,
+            agent_type="customer",
+            channel_id="webchat",
+            service_url=settings.azure_ai_project_endpoint,
+        )
+    return _m365_agent_provider
+
+
+def _get_agent_id() -> str:
+    """Get the M365 unique agent ID for telemetry."""
+    return _get_m365_agent_provider().agent_id
+
+
+def _get_agent_name() -> str:
+    """Get the agent name for telemetry."""
+    settings = get_settings()
+    return settings.agent_name
 
 
 def set_business_context(
@@ -163,6 +192,8 @@ def get_products() -> str:
         tool_name="get_products",
         tool_description="Get all available products from the pet store catalog",
         conversation_id=_business_context.get("session_id"),
+        agent_id=_get_agent_id(),
+        agent_name=_get_agent_name(),
     ) as span:
         try:
             import asyncio
@@ -255,6 +286,8 @@ def get_product_details(
         tool_name="get_product_details",
         tool_description="Get detailed information about a specific product",
         conversation_id=_business_context.get("session_id"),
+        agent_id=_get_agent_id(),
+        agent_name=_get_agent_name(),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"product_id": product_id})
 
@@ -341,6 +374,8 @@ def search_products(
         tool_name="search_products",
         tool_description="Search for products by name or description",
         conversation_id=_business_context.get("session_id"),
+        agent_id=_get_agent_id(),
+        agent_name=_get_agent_name(),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"query": query})
 
@@ -438,6 +473,8 @@ def place_order(
         tool_name="place_order",
         tool_description="Place a new order for a customer",
         conversation_id=_business_context.get("session_id"),
+        agent_id=_get_agent_id(),
+        agent_name=_get_agent_name(),
     ) as span:
         telemetry.set_tool_call_attributes(
             span,
@@ -552,6 +589,8 @@ def get_order_status(
         tool_name="get_order_status",
         tool_description="Check the status of an existing order",
         conversation_id=_business_context.get("session_id"),
+        agent_id=_get_agent_id(),
+        agent_name=_get_agent_name(),
     ) as span:
         telemetry.set_tool_call_attributes(span, arguments={"order_id": order_id})
 

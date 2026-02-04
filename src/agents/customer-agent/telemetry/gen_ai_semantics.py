@@ -577,6 +577,8 @@ class GenAITelemetry:
         tool_type: str = GenAIToolType.FUNCTION.value,
         tool_call_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
     ):
         """
         Create a span for tool execution operation.
@@ -590,6 +592,8 @@ class GenAITelemetry:
             tool_type: Type of tool (function, extension, datastore)
             tool_call_id: Unique identifier for this tool call
             conversation_id: Thread/conversation ID for correlation
+            agent_id: Unique agent identifier (M365 Agent ID)
+            agent_name: Human-readable name of the agent
 
         Returns:
             Context manager for the span
@@ -604,6 +608,8 @@ class GenAITelemetry:
             tool_description=tool_description,
             tool_call_id=tool_call_id,
             conversation_id=conversation_id,
+            agent_id=agent_id,
+            agent_name=agent_name,
         )
 
         return self._tracer.start_as_current_span(

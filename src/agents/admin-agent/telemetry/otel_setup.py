@@ -75,6 +75,31 @@ class GenAISpanProcessor(SpanProcessor):
         self._k8s_cloud_attrs: dict[str, Any] = {}
         self._k8s_attrs_loaded = False
 
+        # Cache M365 agent ID for efficiency
+        self._m365_agent_id: Optional[str] = None
+        self._m365_agent_id_loaded = False
+
+    def _get_m365_agent_id(self) -> str:
+        """Get M365 agent ID (UUID format) for gen_ai.agent.id attribute."""
+        if self._m365_agent_id_loaded:
+            return self._m365_agent_id or self.agent_name
+
+        try:
+            from .m365_agent_integration import get_m365_agent_id_provider
+
+            provider = get_m365_agent_id_provider(
+                agent_name=self.agent_name,
+                agent_type="admin",
+            )
+            self._m365_agent_id = provider.agent_id
+            logger.debug(f"M365 agent ID loaded: {self._m365_agent_id}")
+        except Exception as e:
+            logger.warning(f"Failed to get M365 agent ID, using agent_name: {e}")
+            self._m365_agent_id = self.agent_name
+
+        self._m365_agent_id_loaded = True
+        return self._m365_agent_id or self.agent_name
+
     def _load_k8s_cloud_attrs(self) -> None:
         """Load K8s and cloud attributes once (lazy initialization)."""
         if self._k8s_attrs_loaded:
@@ -120,7 +145,9 @@ class GenAISpanProcessor(SpanProcessor):
             if not span.attributes.get("gen_ai.agent.name"):
                 span.set_attribute("gen_ai.agent.name", self.agent_name)
             if not span.attributes.get("gen_ai.agent.id"):
-                span.set_attribute("gen_ai.agent.id", self.agent_name)
+                # Use M365 agent ID for gen_ai.agent.id (UUID format)
+                m365_agent_id = self._get_m365_agent_id()
+                span.set_attribute("gen_ai.agent.id", m365_agent_id)
 
         # Set provider name if not already set
         if not span.attributes.get("gen_ai.provider.name"):
@@ -366,6 +393,7 @@ def trace_function(name: Optional[str] = None) -> Callable[[F], F]:
     This decorator creates spans for function calls and records:
     - Function parameters as span attributes
     - Return values as span attributes
+    - M365 Agent ID as gen_ai.agent.id attribute
     - Exceptions as span events with proper error handling
 
     Args:
@@ -389,6 +417,8 @@ def trace_function(name: Optional[str] = None) -> Callable[[F], F]:
             with tracer.start_as_current_span(span_name) as span:
                 # Record function parameters (basic types only)
                 _record_function_params(span, args, kwargs)
+                # Add M365 agent ID for correlation
+                _set_m365_agent_attributes(span)
 
                 try:
                     result = await func(*args, **kwargs)
@@ -407,6 +437,8 @@ def trace_function(name: Optional[str] = None) -> Callable[[F], F]:
             with tracer.start_as_current_span(span_name) as span:
                 # Record function parameters (basic types only)
                 _record_function_params(span, args, kwargs)
+                # Add M365 agent ID for correlation
+                _set_m365_agent_attributes(span)
 
                 try:
                     result = func(*args, **kwargs)
@@ -427,6 +459,24 @@ def trace_function(name: Optional[str] = None) -> Callable[[F], F]:
         return sync_wrapper  # type: ignore
 
     return decorator
+
+
+def _set_m365_agent_attributes(span: trace.Span) -> None:
+    """Set M365 agent ID attributes on a span for correlation."""
+    try:
+        from .m365_agent_integration import get_m365_agent_id_provider
+        from config import get_settings
+
+        settings = get_settings()
+        provider = get_m365_agent_id_provider(
+            agent_name=settings.agent_name,
+            agent_type="admin",
+        )
+        span.set_attribute("gen_ai.agent.id", provider.agent_id)
+        span.set_attribute("gen_ai.agent.name", settings.agent_name)
+    except Exception:
+        # Silently ignore if M365 integration not available
+        pass
 
 
 def _record_function_params(span: trace.Span, args: tuple, kwargs: dict) -> None:

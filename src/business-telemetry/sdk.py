@@ -49,11 +49,21 @@ from business_events import (
 )
 from telemetry_client import BusinessTelemetryClient
 from fabric_sinks import ConsoleSink, FileSink, EventHubSink, OneLakeSink
+from m365_agent_integration import (
+    M365AgentIdProvider,
+    M365AgentIdentity,
+    get_m365_agent_id_provider,
+    get_m365_agent_id,
+    is_m365_sdk_available,
+)
 
 logger = logging.getLogger(__name__)
 
 # Global client instance
 _client: Optional[BusinessTelemetryClient] = None
+
+# Global M365 agent provider instance
+_m365_provider: Optional[M365AgentIdProvider] = None
 
 
 async def init_telemetry(
@@ -103,6 +113,89 @@ def get_telemetry_client() -> Optional[BusinessTelemetryClient]:
     return _client
 
 
+def get_m365_agent_provider() -> Optional[M365AgentIdProvider]:
+    """Get the global M365 agent ID provider instance."""
+    return _m365_provider
+
+
+def init_m365_agent_context(
+    agent_name: str,
+    agent_type: str = "telemetry",
+    channel_id: str = "business-telemetry",
+    service_url: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    app_id: Optional[str] = None,
+) -> M365AgentIdProvider:
+    """
+    Initialize the M365 Agent ID provider for business telemetry.
+
+    This creates a unique agent ID following Microsoft 365 Agents SDK patterns.
+    The agent ID can be used as the `gen_ai.agent.id` attribute in telemetry events.
+
+    Args:
+        agent_name: Human-readable name of the agent (e.g., 'customer-agent')
+        agent_type: Type of agent (e.g., 'admin', 'customer', 'telemetry')
+        channel_id: Communication channel identifier
+        service_url: URL of the service hosting the agent
+        tenant_id: Azure AD tenant ID (from environment if not provided)
+        app_id: Azure AD application ID (from environment if not provided)
+
+    Returns:
+        M365AgentIdProvider instance with unique agent ID
+    """
+    global _m365_provider
+
+    _m365_provider = get_m365_agent_id_provider(
+        agent_name=agent_name,
+        agent_type=agent_type,
+        channel_id=channel_id,
+        service_url=service_url,
+        tenant_id=tenant_id,
+        app_id=app_id,
+    )
+
+    logger.info(
+        f"M365 agent context initialized: agent_id={_m365_provider.agent_id}, "
+        f"agent_name={agent_name}, agent_type={agent_type}"
+    )
+
+    return _m365_provider
+
+
+def get_m365_agent_identity(
+    conversation_id: Optional[str] = None,
+    activity_id: Optional[str] = None,
+) -> Optional[M365AgentIdentity]:
+    """
+    Get the M365 agent identity with optional conversation context.
+
+    Args:
+        conversation_id: Current conversation/thread ID
+        activity_id: Current activity ID within the conversation
+
+    Returns:
+        M365AgentIdentity with all relevant attributes, or None if not initialized
+    """
+    if _m365_provider:
+        return _m365_provider.get_identity(
+            conversation_id=conversation_id,
+            activity_id=activity_id,
+        )
+    return None
+
+
+def get_gen_ai_agent_id() -> Optional[str]:
+    """
+    Get the M365 unique agent ID to use for gen_ai.agent.id attribute.
+
+    Returns:
+        The unique agent ID (UUID format), or None if M365 context not initialized
+    """
+    if _m365_provider:
+        return _m365_provider.agent_id
+    return None
+
+
 def set_telemetry_context(
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -125,6 +218,7 @@ def set_infrastructure_context(
     namespace: Optional[str] = None,
     pod_name: Optional[str] = None,
     deployment_name: Optional[str] = None,
+    use_m365_agent_id: bool = True,
 ):
     """
     Set Fabric-Pulse infrastructure context for correlation.
@@ -136,16 +230,24 @@ def set_infrastructure_context(
 
     Args:
         agent_id: AgentId format: {ClusterId}/{Namespace}/agents/{AgentName}
+                  If None and use_m365_agent_id=True, uses M365 unique agent ID
         agent_session_id: AgentSessionId format: {AgentId}/sessions/{SessionId}
         workload_id: WorkloadId format: {ClusterId}/{Namespace}/{ControllerName}
         cluster_id: Azure resource ID of the AKS cluster (cloud.resource_id)
         namespace: Kubernetes namespace (k8s.namespace.name)
         pod_name: Kubernetes pod name (k8s.pod.name)
         deployment_name: Kubernetes deployment name (k8s.deployment.name)
+        use_m365_agent_id: If True and agent_id is None, use M365 unique agent ID
     """
+    # Use M365 agent ID if available and agent_id not explicitly provided
+    effective_agent_id = agent_id
+    if effective_agent_id is None and use_m365_agent_id and _m365_provider:
+        effective_agent_id = _m365_provider.agent_id
+        logger.debug(f"Using M365 agent ID: {effective_agent_id}")
+
     if _client:
         _client.set_infrastructure_context(
-            agent_id=agent_id,
+            agent_id=effective_agent_id,
             agent_session_id=agent_session_id,
             workload_id=workload_id,
             cluster_id=cluster_id,
@@ -165,6 +267,13 @@ def clear_infrastructure_context():
     """Clear the infrastructure context."""
     if _client:
         _client.clear_infrastructure_context()
+
+
+def clear_m365_agent_context():
+    """Clear the M365 agent context."""
+    global _m365_provider
+    _m365_provider = None
+    logger.info("M365 agent context cleared")
 
 
 # ========================================
@@ -589,13 +698,14 @@ async def emit_agent_session_started(
     deployment_name: Optional[str] = None,
     customer_id: Optional[str] = None,
     trace_id: Optional[str] = None,
+    m365_agent_id: Optional[str] = None,
     **kwargs
 ) -> bool:
     """
     Emit an agent session started event with Fabric-Pulse foreign keys.
 
     This event creates proper entity keys for correlation:
-    - AgentId: {ClusterId}/{Namespace}/agents/{AgentName}
+    - AgentId: Uses M365 unique agent ID (UUID format) for gen_ai.agent.id
     - AgentSessionId: {AgentId}/sessions/{SessionId}
     - WorkloadId: {ClusterId}/{Namespace}/{ControllerName}
 
@@ -612,6 +722,7 @@ async def emit_agent_session_started(
         deployment_name: Deployment name (k8s.deployment.name)
         customer_id: Customer identifier for customer-agent sessions
         trace_id: OpenTelemetry trace ID for correlation
+        m365_agent_id: M365 unique agent ID (UUID). If None, uses global M365 provider
 
     Returns:
         True if event was emitted successfully
@@ -619,6 +730,9 @@ async def emit_agent_session_started(
     if not _client:
         logger.warning("Telemetry client not initialized")
         return False
+
+    # Use M365 agent ID if provided or from global provider
+    effective_agent_id = m365_agent_id or (get_gen_ai_agent_id() if _m365_provider else None)
 
     source = _client.default_source or EventSource.CUSTOMER_AGENT
     event = create_agent_session_started_event(
@@ -633,8 +747,16 @@ async def emit_agent_session_started(
         deployment_name=deployment_name,
         customer_id=customer_id,
         trace_id=trace_id,
+        m365_agent_id=effective_agent_id,
         **kwargs
     )
+
+    # Also set the M365 agent ID in custom properties for additional visibility
+    if effective_agent_id:
+        event.custom_properties["gen_ai.agent.id"] = effective_agent_id
+        event.custom_properties["m365.agent.id"] = effective_agent_id
+        logger.debug(f"Using M365 agent ID for session started: {effective_agent_id}")
+
     return await _client.emit(event)
 
 
@@ -661,6 +783,7 @@ async def emit_agent_session_ended(
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
     trace_id: Optional[str] = None,
+    m365_agent_id: Optional[str] = None,
     **kwargs
 ) -> bool:
     """
@@ -692,6 +815,7 @@ async def emit_agent_session_ended(
         error_type: Type of error if any
         error_message: Error message if any
         trace_id: OpenTelemetry trace ID
+        m365_agent_id: M365 unique agent ID (UUID). If None, uses global M365 provider
 
     Returns:
         True if event was emitted successfully
@@ -699,6 +823,9 @@ async def emit_agent_session_ended(
     if not _client:
         logger.warning("Telemetry client not initialized")
         return False
+
+    # Use M365 agent ID if provided or from global provider
+    effective_agent_id = m365_agent_id or (get_gen_ai_agent_id() if _m365_provider else None)
 
     source = _client.default_source or EventSource.CUSTOMER_AGENT
     event = create_agent_session_ended_event(
@@ -723,8 +850,16 @@ async def emit_agent_session_ended(
         error_type=error_type,
         error_message=error_message,
         trace_id=trace_id,
+        m365_agent_id=effective_agent_id,
         **kwargs
     )
+
+    # Also set the M365 agent ID in custom properties for additional visibility
+    if effective_agent_id:
+        event.custom_properties["gen_ai.agent.id"] = effective_agent_id
+        event.custom_properties["m365.agent.id"] = effective_agent_id
+        logger.debug(f"Using M365 agent ID for session ended: {effective_agent_id}")
+
     return await _client.emit(event)
 
 
@@ -745,6 +880,7 @@ async def emit_agent_tool_call(
     error_message: Optional[str] = None,
     trace_id: Optional[str] = None,
     span_id: Optional[str] = None,
+    m365_agent_id: Optional[str] = None,
     **kwargs
 ) -> bool:
     """
@@ -770,6 +906,7 @@ async def emit_agent_tool_call(
         error_message: Error message if failed
         trace_id: OpenTelemetry trace ID
         span_id: OpenTelemetry span ID
+        m365_agent_id: M365 unique agent ID (UUID). If None, uses global M365 provider
 
     Returns:
         True if event was emitted successfully
@@ -777,6 +914,9 @@ async def emit_agent_tool_call(
     if not _client:
         logger.warning("Telemetry client not initialized")
         return False
+
+    # Use M365 agent ID if provided or from global provider
+    effective_agent_id = m365_agent_id or (get_gen_ai_agent_id() if _m365_provider else None)
 
     source = _client.default_source or EventSource.CUSTOMER_AGENT
     event = create_agent_tool_call_event(
@@ -797,8 +937,16 @@ async def emit_agent_tool_call(
         error_message=error_message,
         trace_id=trace_id,
         span_id=span_id,
+        m365_agent_id=effective_agent_id,
         **kwargs
     )
+
+    # Also set the M365 agent ID in custom properties for additional visibility
+    if effective_agent_id:
+        event.custom_properties["gen_ai.agent.id"] = effective_agent_id
+        event.custom_properties["m365.agent.id"] = effective_agent_id
+        logger.debug(f"Using M365 agent ID for tool call: {effective_agent_id}")
+
     return await _client.emit(event)
 
 
@@ -821,12 +969,19 @@ def track_event(event_type: str, **event_kwargs):
             result = await func(*args, **kwargs)
 
             if _client:
+                # Include M365 agent ID if available
+                properties = {
+                    "function": func.__name__,
+                    **event_kwargs
+                }
+
+                if _m365_provider:
+                    properties["gen_ai.agent.id"] = _m365_provider.agent_id
+                    properties["m365.agent.id"] = _m365_provider.agent_id
+
                 event = BaseEvent(
                     event_type=event_type,
-                    custom_properties={
-                        "function": func.__name__,
-                        **event_kwargs
-                    }
+                    custom_properties=properties
                 )
                 await _client.emit(event)
 
