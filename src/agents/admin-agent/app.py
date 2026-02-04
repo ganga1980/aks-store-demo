@@ -213,11 +213,12 @@ async def get_agent() -> AdminAgent:
 
             # Set infrastructure context for all business events (Fabric-Pulse correlation)
             k8s_ctx = _load_k8s_business_context()
-            agent_id = f"{k8s_ctx.get('cluster_id', 'unknown')}/{k8s_ctx.get('namespace', 'default')}/agents/{settings.agent_name}"
+            # Use M365 agent ID (UUID format) for proper correlation
+            m365_agent_id = _agent.agent_id
             workload_id = f"{k8s_ctx.get('cluster_id', 'unknown')}/{k8s_ctx.get('namespace', 'default')}/{k8s_ctx.get('deployment_name', settings.agent_name)}"
 
             set_infrastructure_context(
-                agent_id=agent_id,
+                agent_id=m365_agent_id,
                 workload_id=workload_id,
                 cluster_id=k8s_ctx.get("cluster_id"),
                 namespace=k8s_ctx.get("namespace"),
@@ -226,7 +227,7 @@ async def get_agent() -> AdminAgent:
             )
 
             _business_telemetry_initialized = True
-            logger.info(f"Business telemetry initialized with infrastructure context: agent_id={agent_id}")
+            logger.info(f"Business telemetry initialized with M365 agent ID: {m365_agent_id}")
         except Exception as e:
             logger.warning(f"Failed to initialize business telemetry: {e}")
 
@@ -299,6 +300,7 @@ async def on_chat_start():
                         deployment_name=k8s_ctx.get("deployment_name"),
                         customer_id="admin",  # Admin sessions don't have customer_id
                         trace_id=trace_id,
+                        m365_agent_id=agent.agent_id,  # Use M365 unique agent ID
                     )
                     # Also emit legacy event for backward compatibility
                     await emit_session_started(session_id=thread_id, user_id="admin")
@@ -481,6 +483,7 @@ async def on_chat_end():
                     # Error info
                     error_occurred=error_occurred,
                     error_type=error_type,
+                    m365_agent_id=agent.agent_id,  # Use M365 unique agent ID
                 )
 
                 # Also emit legacy event for backward compatibility
