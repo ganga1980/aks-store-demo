@@ -102,6 +102,12 @@ class BusinessTelemetryClient:
         self._user_id: Optional[str] = None
         self._correlation_id: Optional[str] = None
 
+        # Customer context for KQL entity correlation
+        self._customer_id: Optional[str] = None
+        self._customer_name: Optional[str] = None
+        self._customer_email: Optional[str] = None
+        self._channel: Optional[str] = None
+
         # Fabric-Pulse infrastructure context for correlation
         self._agent_id: Optional[str] = None
         self._agent_session_id: Optional[str] = None
@@ -287,11 +293,45 @@ class BusinessTelemetryClient:
         if deployment_name is not None:
             self._deployment_name = deployment_name
 
+    def set_customer_context(
+        self,
+        customer_id: Optional[str] = None,
+        customer_name: Optional[str] = None,
+        customer_email: Optional[str] = None,
+        channel: Optional[str] = None,
+    ):
+        """
+        Set customer context for all business events.
+
+        These fields are automatically added to ALL events for KQL entity correlation.
+
+        Args:
+            customer_id: Unique customer identifier
+            customer_name: Customer display name
+            customer_email: Customer email address
+            channel: Channel identifier (Web, CustomerAgent, AdminAgent, API)
+        """
+        if customer_id is not None:
+            self._customer_id = customer_id
+        if customer_name is not None:
+            self._customer_name = customer_name
+        if customer_email is not None:
+            self._customer_email = customer_email
+        if channel is not None:
+            self._channel = channel
+
     def clear_context(self):
         """Clear the current context."""
         self._session_id = None
         self._user_id = None
         self._correlation_id = None
+
+    def clear_customer_context(self):
+        """Clear the customer context."""
+        self._customer_id = None
+        self._customer_name = None
+        self._customer_email = None
+        self._channel = None
 
     def clear_infrastructure_context(self):
         """Clear the infrastructure context."""
@@ -344,6 +384,16 @@ class BusinessTelemetryClient:
             event.correlation_id = self._correlation_id
         if not event.event_source and self.default_source:
             event.event_source = self.default_source.value
+
+        # Customer context (applied to ALL events for KQL entity correlation)
+        if not event.customer_id and self._customer_id:
+            event.customer_id = self._customer_id
+        if not event.customer_name and self._customer_name:
+            event.customer_name = self._customer_name
+        if not event.customer_email and self._customer_email:
+            event.customer_email = self._customer_email
+        if not event.channel and self._channel:
+            event.channel = self._channel
 
         # Fabric-Pulse infrastructure context
         if not event.agent_id and self._agent_id:
@@ -461,20 +511,24 @@ class BusinessTelemetryClient:
         order_id: str,
         items: List[Dict[str, Any]],
         total: float,
+        customer_id: Optional[str] = None,
         customer_name: Optional[str] = None,
         customer_email: Optional[str] = None,
+        channel: Optional[str] = None,
         ai_assisted: bool = False,
         **kwargs
     ) -> bool:
-        """Emit order placed event."""
+        """Emit order placed event with full customer and channel context."""
         event = OrderEvent(
             event_type=EventType.ORDER_PLACED.value,
             order_id=order_id,
             order_items=items,
             order_total=total,
             item_count=len(items),
+            customer_id=customer_id,
             customer_name=customer_name,
             customer_email=customer_email,
+            channel=channel,
             order_placed_at=datetime.now(timezone.utc).isoformat(),
             ai_assisted=ai_assisted,
             **kwargs

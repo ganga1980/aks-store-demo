@@ -26,7 +26,14 @@ from config import get_settings
 from telemetry import configure_telemetry, get_tracer, get_gen_ai_telemetry
 from telemetry.k8s_semantics import get_k8s_attributes, get_cloud_attributes, is_running_in_kubernetes
 from agent import CustomerAgent
-from agent.tools import set_business_context
+from agent.tools import set_business_context, set_customer_context
+from session_customer import (
+    generate_session_customer,
+    set_session_customer,
+    get_session_customer,
+    clear_session_customer,
+    SessionCustomer,
+)
 
 # Add business-telemetry SDK to path
 # In container: /app/business_telemetry_sdk (copied via Dockerfile)
@@ -45,6 +52,7 @@ try:
         init_telemetry as init_business_telemetry,
         shutdown_telemetry as shutdown_business_telemetry,
         set_infrastructure_context,
+        set_customer_context as set_sdk_customer_context,
         emit_session_started,
         emit_session_ended,
         emit_customer_query,
@@ -245,6 +253,7 @@ async def on_chat_start():
     Handle the start of a new chat session.
 
     Creates a new conversation thread and sends a welcome message.
+    Generates a random customer identity for the session.
     """
     with tracer.start_as_current_span("chat_session_start") as span:
         # Set agent name attribute for correlation (agent_id set after agent creation)
@@ -260,16 +269,40 @@ async def on_chat_start():
             # Create a new thread for this session
             thread_id = await agent.create_thread()
 
+            # === GENERATE SESSION CUSTOMER ===
+            # Each session gets a unique random customer identity
+            session_customer = generate_session_customer()
+            set_session_customer(session_customer)
+            cl.user_session.set("customer", session_customer.to_dict())
+            logger.info(f"Session customer generated: {session_customer.customer_id} ({session_customer.full_name})")
+            # ==================================
+
             # Store thread ID and session start time in user session
             cl.user_session.set("thread_id", thread_id)
             cl.user_session.set("session_start_time", time.time())
             cl.user_session.set("interaction_count", 0)
 
-            # Set business telemetry context for tools
+            # Set business telemetry context for tools (including customer context)
             set_business_context(session_id=thread_id, correlation_id=thread_id)
+            set_customer_context(
+                customer_id=session_customer.customer_id,
+                customer_name=session_customer.full_name,
+                customer_email=session_customer.email,
+            )
+
+            # Set customer context on the SDK client so ALL events include customer info
+            if BUSINESS_TELEMETRY_AVAILABLE:
+                set_sdk_customer_context(
+                    customer_id=session_customer.customer_id,
+                    customer_name=session_customer.full_name,
+                    customer_email=session_customer.email,
+                    channel="CustomerAgent",
+                )
 
             span.set_attribute("thread.id", thread_id)
             span.set_attribute("gen_ai.conversation.id", thread_id)
+            span.set_attribute("customer.id", session_customer.customer_id)
+            span.set_attribute("customer.name", session_customer.full_name)
             logger.info(f"New chat session started with thread: {thread_id}")
 
             # === GOLDEN SIGNAL: Session Started (Saturation) ===
@@ -289,7 +322,7 @@ async def on_chat_start():
                     if current_span and current_span.get_span_context().is_valid:
                         trace_id = format(current_span.get_span_context().trace_id, '032x')
 
-                    # Emit new Fabric-Pulse compliant event
+                    # Emit new Fabric-Pulse compliant event with customer context
                     await emit_agent_session_started(
                         agent_name=settings.agent_name,
                         session_id=thread_id,
@@ -299,12 +332,15 @@ async def on_chat_start():
                         node_name=k8s_ctx.get("node_name"),
                         replicaset_name=k8s_ctx.get("replicaset_name"),
                         deployment_name=k8s_ctx.get("deployment_name"),
-                        customer_id=None,  # Could be set from auth if available
+                        customer_id=session_customer.customer_id,
                         trace_id=trace_id,
                         m365_agent_id=agent.agent_id,  # Use M365 unique agent ID
                     )
                     # Also emit legacy event for backward compatibility
-                    await emit_session_started(session_id=thread_id)
+                    await emit_session_started(
+                        session_id=thread_id,
+                        user_id=session_customer.customer_id,
+                    )
                 except Exception as e:
                     logger.debug(f"Business telemetry session_started skipped: {e}")
             # =============================================================================

@@ -78,6 +78,16 @@ _business_context = {
     "correlation_id": None,
 }
 
+# Customer context for the current session
+_customer_context = {
+    "customer_id": None,
+    "customer_name": None,
+    "customer_email": None,
+}
+
+# Channel identifier for customer-agent
+CUSTOMER_AGENT_CHANNEL = "CustomerAgent"
+
 
 def _get_telemetry():
     """Get or create Gen AI telemetry instance."""
@@ -132,6 +142,65 @@ def set_business_context(
             user_id=user_id,
             correlation_id=correlation_id,
         )
+
+
+def set_customer_context(
+    customer_id: Optional[str] = None,
+    customer_name: Optional[str] = None,
+    customer_email: Optional[str] = None,
+) -> None:
+    """Set customer context for business telemetry events (per session)."""
+    if customer_id:
+        _customer_context["customer_id"] = customer_id
+    if customer_name:
+        _customer_context["customer_name"] = customer_name
+    if customer_email:
+        _customer_context["customer_email"] = customer_email
+
+
+def get_customer_context() -> dict:
+    """Get current customer context."""
+    return _customer_context.copy()
+
+
+def _derive_product_category(product_name: str) -> str:
+    """
+    Derive product category from product name for pet store products.
+
+    Args:
+        product_name: Product name (lowercase)
+
+    Returns:
+        Category string (Food, Toys, Accessories, Health, Housing, Other)
+    """
+    product_name = product_name.lower()
+
+    # Food category keywords
+    food_keywords = ["food", "treat", "kibble", "feed", "snack", "chew", "biscuit", "meal"]
+    if any(kw in product_name for kw in food_keywords):
+        return "Food"
+
+    # Toys category keywords
+    toy_keywords = ["toy", "ball", "frisbee", "rope", "squeaky", "plush", "interactive", "puzzle"]
+    if any(kw in product_name for kw in toy_keywords):
+        return "Toys"
+
+    # Health category keywords
+    health_keywords = ["vitamin", "supplement", "medicine", "flea", "tick", "shampoo", "grooming", "brush"]
+    if any(kw in product_name for kw in health_keywords):
+        return "Health"
+
+    # Housing category keywords
+    housing_keywords = ["bed", "crate", "kennel", "cage", "aquarium", "tank", "house", "carrier"]
+    if any(kw in product_name for kw in housing_keywords):
+        return "Housing"
+
+    # Accessories category keywords
+    accessory_keywords = ["collar", "leash", "harness", "bowl", "feeder", "tag", "coat", "sweater"]
+    if any(kw in product_name for kw in accessory_keywords):
+        return "Accessories"
+
+    return "Other"
 
 
 def _emit_business_event_sync(coro):
@@ -309,6 +378,10 @@ def get_product_details(
                 telemetry.set_tool_call_attributes(span, result=result)
                 return result
 
+            # Derive product category from name (pet store products)
+            product_name = product.get("name", "").lower()
+            category = _derive_product_category(product_name)
+
             result = json.dumps({
                 "success": True,
                 "product": {
@@ -317,6 +390,7 @@ def get_product_details(
                     "description": product.get("description", ""),
                     "price": product.get("price"),
                     "image": product.get("image", ""),
+                    "category": category,
                 },
                 "message": f"Here are the details for {product.get('name')}."
             })
@@ -336,6 +410,7 @@ def get_product_details(
                 emit_product_viewed(
                     product_id=str(product.get("id")),
                     product_name=product.get("name", ""),
+                    category=category,
                     price=float(product.get("price", 0)),
                     ai_assisted=True,
                 )
@@ -458,16 +533,24 @@ def search_products(
 
 
 def place_order(
-    customer_id: Annotated[str, Field(description="Unique identifier for the customer placing the order")],
     items: Annotated[str, Field(
         description="JSON string containing a list of items to order. "
                     "Each item should have: product_id, name, price, quantity. "
                     "Example: '[{\"product_id\": 1, \"name\": \"Dog Food\", \"price\": 29.99, \"quantity\": 2}]'"
-    )]
+    )],
+    customer_id: Annotated[Optional[str], Field(
+        description="Optional customer identifier. If not provided, uses the current session's customer."
+    )] = None
 ) -> str:
-    """Place a new order for a customer."""
+    """Place a new order for a customer. Uses session customer details unless explicitly specified."""
     telemetry = _get_telemetry()
     start_time = time.perf_counter()
+
+    # Get session customer context - use generated customer unless explicitly provided
+    cust_ctx = get_customer_context()
+    effective_customer_id = customer_id if customer_id else cust_ctx.get("customer_id", "guest")
+    effective_customer_name = cust_ctx.get("customer_name", "Guest Customer")
+    effective_customer_email = cust_ctx.get("customer_email")
 
     with telemetry.execute_tool_span(
         tool_name="place_order",
@@ -478,7 +561,7 @@ def place_order(
     ) as span:
         telemetry.set_tool_call_attributes(
             span,
-            arguments={"customer_id": customer_id, "items": items}
+            arguments={"customer_id": effective_customer_id, "items": items}
         )
 
         try:
@@ -509,7 +592,7 @@ def place_order(
             if loop.is_running():
                 import nest_asyncio
                 nest_asyncio.apply()
-            order_result = asyncio.run(client.place_order(customer_id=customer_id, items=items_list))
+            order_result = asyncio.run(client.place_order(customer_id=effective_customer_id, items=items_list))
 
             if order_result.get("success"):
                 items_summary = ", ".join(
@@ -520,22 +603,28 @@ def place_order(
                 result = json.dumps({
                     "success": True,
                     "order_id": order_result.get("order_id"),
-                    "customer_id": customer_id,
+                    "customer_id": effective_customer_id,
+                    "customer_name": effective_customer_name,
                     "total": order_result.get("total"),
                     "status": "pending",
                     "items_summary": items_summary,
                     "message": f"🎉 Order placed successfully! Your order ID is {order_result.get('order_id')}. "
+                              f"Customer: {effective_customer_name} (ID: {effective_customer_id}). "
                               f"Order total: ${order_result.get('total', 0):.2f}. "
                               f"Items: {items_summary}"
                 })
 
                 # === BUSINESS TELEMETRY: Order Placed ===
+                # Include full customer context and channel for KQL entity creation
                 _emit_business_event_sync(
                     emit_order_placed(
                         order_id=str(order_result.get("order_id")),
                         items=items_list,
                         total=float(order_result.get("total", 0)),
-                        customer_name=customer_id,
+                        customer_id=effective_customer_id,
+                        customer_name=effective_customer_name,
+                        customer_email=effective_customer_email,
+                        channel=CUSTOMER_AGENT_CHANNEL,
                         ai_assisted=True,
                     )
                 )

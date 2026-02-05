@@ -24,4 +24,4 @@ commonLabels:
 
 images:
   - name: retaillocationregistry.azurecr.io/aks-store-demo/admin-agent
-    newTag: "1.5.0"
+    newTag: "1.5.3"

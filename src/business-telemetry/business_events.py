@@ -96,6 +96,15 @@ class BaseEvent:
     session_id: Optional[str] = None
     user_id: Optional[str] = None
 
+    # === CUSTOMER CONTEXT ===
+    # These fields are included in ALL events for KQL entity correlation
+    customer_id: Optional[str] = None  # Unique customer identifier
+    customer_name: Optional[str] = None  # Customer display name
+    customer_email: Optional[str] = None  # Customer email address
+
+    # === CHANNEL CONTEXT ===
+    channel: Optional[str] = None  # Web, CustomerAgent, AdminAgent, API
+
     # === FABRIC-PULSE ONTOLOGY FOREIGN KEYS ===
     # These fields enable correlation with infrastructure and agent entities
     # AgentId format: {ClusterId}/{Namespace}/agents/{AgentName}
@@ -187,8 +196,12 @@ class OrderEvent(BaseEvent):
     item_count: Optional[int] = None
 
     # Customer context
+    customer_id: Optional[str] = None  # Unique customer identifier
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
+
+    # Channel context (for KQL attribution)
+    channel: Optional[str] = None  # Web, CustomerAgent, AdminAgent, API
 
     # Timing
     order_placed_at: Optional[str] = None
@@ -215,6 +228,15 @@ class CustomerEvent(BaseEvent):
     Captures customer sessions, queries, and general interactions
     with the store applications.
     """
+
+    # Customer identification (for KQL Customer entity)
+    customer_id: Optional[str] = None  # Unique customer identifier
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_status: Optional[str] = None  # active, inactive, new
+
+    # Channel context
+    channel: Optional[str] = None  # Web, CustomerAgent, AdminAgent, API
 
     # Session context
     session_duration_ms: Optional[int] = None
@@ -617,13 +639,16 @@ def create_order_placed_event(
     items: List[Dict[str, Any]],
     total: float,
     source: EventSource,
+    customer_id: Optional[str] = None,
     customer_name: Optional[str] = None,
+    customer_email: Optional[str] = None,
+    channel: Optional[str] = None,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     correlation_id: Optional[str] = None,
     **kwargs
 ) -> OrderEvent:
-    """Create an order placed event."""
+    """Create an order placed event with full customer and channel context."""
     return OrderEvent(
         event_type=EventType.ORDER_PLACED.value,
         event_source=source.value,
@@ -631,7 +656,10 @@ def create_order_placed_event(
         order_items=items,
         order_total=total,
         item_count=len(items),
+        customer_id=customer_id,
         customer_name=customer_name,
+        customer_email=customer_email,
+        channel=channel,
         order_placed_at=datetime.now(timezone.utc).isoformat(),
         session_id=session_id,
         user_id=user_id,

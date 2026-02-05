@@ -257,10 +257,43 @@ def set_infrastructure_context(
         )
 
 
+def set_customer_context(
+    customer_id: Optional[str] = None,
+    customer_name: Optional[str] = None,
+    customer_email: Optional[str] = None,
+    channel: Optional[str] = None,
+):
+    """
+    Set customer context for all business events.
+
+    These fields are automatically added to ALL events for KQL entity correlation.
+    Call this once per session to ensure all events include customer information.
+
+    Args:
+        customer_id: Unique customer identifier
+        customer_name: Customer display name
+        customer_email: Customer email address
+        channel: Channel identifier (Web, CustomerAgent, AdminAgent, API)
+    """
+    if _client:
+        _client.set_customer_context(
+            customer_id=customer_id,
+            customer_name=customer_name,
+            customer_email=customer_email,
+            channel=channel,
+        )
+
+
 def clear_telemetry_context():
     """Clear the current telemetry context."""
     if _client:
         _client.clear_context()
+
+
+def clear_customer_context():
+    """Clear the customer context."""
+    if _client:
+        _client.clear_customer_context()
 
 
 def clear_infrastructure_context():
@@ -363,15 +396,27 @@ async def emit_order_placed(
     order_id: str,
     items: List[Dict[str, Any]],
     total: float,
+    customer_id: Optional[str] = None,
     customer_name: Optional[str] = None,
     customer_email: Optional[str] = None,
+    channel: Optional[str] = None,
     ai_assisted: bool = False,
     **kwargs
 ) -> bool:
     """
-    Emit an order placed event.
+    Emit an order placed event with full customer and channel context.
 
     Call when an order is successfully placed.
+
+    Args:
+        order_id: Unique order identifier
+        items: List of order items
+        total: Order total amount
+        customer_id: Unique customer identifier
+        customer_name: Customer display name
+        customer_email: Customer email address
+        channel: Order channel (Web, CustomerAgent, AdminAgent, API)
+        ai_assisted: Whether AI assisted with the order
     """
     if not _client:
         logger.warning("Telemetry client not initialized")
@@ -381,8 +426,10 @@ async def emit_order_placed(
         order_id=order_id,
         items=items,
         total=total,
+        customer_id=customer_id,
         customer_name=customer_name,
         customer_email=customer_email,
+        channel=channel,
         ai_assisted=ai_assisted,
         **kwargs
     )
